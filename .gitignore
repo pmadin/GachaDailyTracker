@@ -54,3 +54,5 @@ frontend/public/icons/
 
 #MCP Servers
 .mcp.json
+# DB backups (contain user emails + password hashes — never commit)
+backups/

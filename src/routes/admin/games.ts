@@ -6,6 +6,7 @@ import sizeOf from 'image-size';
 import database from '../../config/database';
 import { requireAdmin, requireOwner } from '../../middleware/admin';
 import gameDataService from '../../services/gameDataService';
+import { runUpstreamSync, SyncGuardError } from '../../services/gameSyncService';
 
 const adminGamesRouter: Router = express.Router();
 
@@ -415,10 +416,21 @@ adminGamesRouter.delete('/games/:id/hard', requireOwner, async (req, res) => {
  *     tags: [Admin]
  *     security:
  *       - bearerAuth: []
- *     description: Always fetches live from the upstream GitHub repo. No request body needed.
+ *     description: |
+ *       Always fetches live from the upstream GitHub repo. No request body needed.
+ *       Never deletes games. Upstream renames listed in data/game-renames.json are applied in place
+ *       (same game id, so tracking/streaks are preserved). A game that any user tracks is never
+ *       deactivated — it is reported in skipped_deactivations. Pass dryRun=true to see the full
+ *       plan without writing anything.
+ *     parameters:
+ *       - in: query
+ *         name: dryRun
+ *         schema:
+ *           type: boolean
+ *         description: Preview only — compute and return the plan, write nothing.
  *     responses:
  *       200:
- *         description: Import complete
+ *         description: Import (or preview) complete
  *         content:
  *           application/json:
  *             schema:
@@ -426,81 +438,60 @@ adminGamesRouter.delete('/games/:id/hard', requireOwner, async (req, res) => {
  *               properties:
  *                 message:
  *                   type: string
+ *                 dry_run:
+ *                   type: boolean
  *                 total:
  *                   type: integer
  *                 added:
  *                   type: integer
  *                 updated:
  *                   type: integer
+ *                 reactivated:
+ *                   type: integer
+ *                 renamed:
+ *                   type: integer
+ *                 deactivated:
+ *                   type: integer
+ *                 unchanged:
+ *                   type: integer
+ *                 skipped_deactivations:
+ *                   type: array
+ *                   description: Games missing upstream but still tracked by users, left active.
+ *                   items:
+ *                     type: object
+ *                 rename_conflicts:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                 invalid_entries:
+ *                   type: array
+ *                   items:
+ *                     type: string
+ *                 details:
+ *                   type: object
  *                 source:
  *                   type: string
  *                 last_synced_at:
  *                   type: string
  *                   format: date-time
+ *                   nullable: true
  *       403:
  *         description: Forbidden
+ *       422:
+ *         description: Upstream data looks truncated or invalid — nothing was changed
  */
+// Sync logic (dry run, rename map, tracked-game protection) lives in services/gameSyncService.ts.
 adminGamesRouter.post('/import/games', requireAdmin, async (req, res) => {
   try {
-    const gameData = await gameDataService.fetchLiveFromSource();
-
-    const client = await database.getClient();
-    let added = 0;
-    let updated = 0;
-
-    try {
-      await client.query('BEGIN');
-
-      await client.query(`UPDATE games SET is_active = false WHERE source = 'game-time-master'`);
-
-      const values: unknown[] = [];
-      const placeholders: string[] = [];
-
-      gameData.forEach((game, i) => {
-        const b = i * 6;
-        placeholders.push(`($${b+1},$${b+2},$${b+3},$${b+4},$${b+5},$${b+6})`);
-        values.push(game.game, game.server, game.timezone, game.dailyReset, game.icon ?? null, 'game-time-master');
-      });
-
-      const upsertResult = await client.query(
-        `INSERT INTO games (name, server, timezone, daily_reset, icon_name, source)
-         VALUES ${placeholders.join(',')}
-         ON CONFLICT (name, server) DO UPDATE SET
-           timezone      = EXCLUDED.timezone,
-           daily_reset   = EXCLUDED.daily_reset,
-           icon_name     = EXCLUDED.icon_name,
-           source        = EXCLUDED.source,
-           is_active     = true,
-           last_verified = CURRENT_TIMESTAMP`,
-        values
-      );
-
-      added   = upsertResult.rowCount ?? 0;
-      updated = gameData.length - added;
-
-      await client.query('COMMIT');
-    } catch (e) {
-      await client.query('ROLLBACK').catch(() => {});
-      throw e;
-    } finally {
-      client.release();
-    }
-
-    await database.query(`
-      UPDATE games SET source = 'game-time-master'
-      WHERE source != 'game-time-master' AND is_active = true
-    `);
-
-    res.json({
-      message: 'Import complete',
-      total: gameData.length,
-      added,
-      updated,
-      source: 'upstream (live)',
-      last_synced_at: new Date().toISOString(),
-    });
+    const dryRun = req.query.dryRun === 'true' || req.body?.dryRun === true;
+    const report = await runUpstreamSync({ dryRun });
+    res.json(report);
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : 'Unknown error';
+    if (error instanceof SyncGuardError) {
+      console.warn('Admin import games refused:', msg);
+      return res.status(422).json({ error: msg });
+    }
     console.error('Admin import games error:', msg);
     res.status(500).json({ error: 'Import failed', details: msg });
   }
