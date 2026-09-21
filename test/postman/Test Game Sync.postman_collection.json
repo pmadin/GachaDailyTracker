@@ -1,0 +1,393 @@
+{
+	"info": {
+		"name": "Test Game Sync",
+		"description": "Upstream game sync safety (POST /gdt/admin/import/games). Requires an admin token and a regular-user token plus the synthetic ZZ-CI games — run test/ci/sync-test-setup.sh first and pass ADMIN_TOKEN/USER_TOKEN as --env-var admin_token=... --env-var user_token=... . Pins the guarantees: a tracked game is never deactivated, preview writes nothing, admin-added games are untouched, games are never deleted, and a second sync is a no-op.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Import without JWT returns 401",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							"pm.test('401 without a token', () => pm.response.to.have.status(401));"
+						]
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [],
+				"url": "{{base_url}}/gdt/admin/import/games"
+			}
+		},
+		{
+			"name": "Import as a regular user returns 403",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							"pm.test('403 for a non-admin', () => pm.response.to.have.status(403));"
+						]
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer {{user_token}}"
+					}
+				],
+				"url": "{{base_url}}/gdt/admin/import/games"
+			}
+		},
+		{
+			"name": "Record total game count before syncing",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							"pm.test('200', () => pm.response.to.have.status(200));",
+							"pm.test('total is a number', () => {",
+							"  const j = pm.response.json();",
+							"  pm.expect(j.total).to.be.a('number');",
+							"  pm.collectionVariables.set('games_total_before', j.total);",
+							"});"
+						]
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer {{admin_token}}"
+					}
+				],
+				"url": "{{base_url}}/gdt/admin/games?limit=1"
+			}
+		},
+		{
+			"name": "Locate the synthetic games",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							"pm.test('200', () => pm.response.to.have.status(200));",
+							"const j = pm.response.json();",
+							"const ghosts = j.games.filter(g => g.name.startsWith('ZZ-CI-SYNC '));",
+							"const by = n => ghosts.find(g => g.name === n);",
+							"pm.test('all 3 synthetic games exist and are active', () => {",
+							"  pm.expect(ghosts.length).to.eql(3);",
+							"  pm.expect(ghosts.every(g => g.is_active)).to.eql(true);",
+							"});",
+							"pm.test('remember their ids', () => {",
+							"  pm.expect(by('ZZ-CI-SYNC Ghost Tracked'), 'tracked ghost').to.exist;",
+							"  pm.collectionVariables.set('ghost_tracked_id', by('ZZ-CI-SYNC Ghost Tracked').id);",
+							"  pm.collectionVariables.set('ghost_untracked_id', by('ZZ-CI-SYNC Ghost Untracked').id);",
+							"  pm.collectionVariables.set('admin_game_id', by('ZZ-CI-SYNC Admin Game').id);",
+							"});",
+							"pm.test('the admin game has source \"admin\"', () => pm.expect(by('ZZ-CI-SYNC Admin Game').source).to.eql('admin'));"
+						]
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer {{admin_token}}"
+					}
+				],
+				"url": "{{base_url}}/gdt/admin/games?search=ZZ-CI-SYNC&limit=50"
+			}
+		},
+		{
+			"name": "Regular user tracks the tracked ghost game",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							"pm.test('201 — now tracked', () => pm.response.to.have.status(201));"
+						]
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer {{user_token}}"
+					}
+				],
+				"url": "{{base_url}}/gdt/tracker/games/{{ghost_tracked_id}}"
+			}
+		},
+		{
+			"name": "Preview (dryRun=true) reports the right plan",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							"pm.test('200', () => pm.response.to.have.status(200));",
+							"const j = pm.response.json();",
+							"pm.test('is flagged as a dry run and sees upstream', () => {",
+							"  pm.expect(j.dry_run).to.eql(true);",
+							"  pm.expect(j.total).to.be.above(300);",
+							"  ['added','updated','renamed','deactivated','unchanged'].forEach(k => pm.expect(j[k], k).to.be.a('number'));",
+							"});",
+							"pm.test('tracked ghost is KEPT (reported as skipped, tracked_by 1)', () => {",
+							"  const s = j.skipped_deactivations.find(g => g.name === 'ZZ-CI-SYNC Ghost Tracked');",
+							"  pm.expect(s, 'skipped entry').to.exist;",
+							"  pm.expect(s.tracked_by).to.eql(1);",
+							"  pm.expect(j.details.deactivated).to.not.include('ZZ-CI-SYNC Ghost Tracked||ZZ-CI');",
+							"});",
+							"pm.test('untracked ghost WOULD be deactivated', () => pm.expect(j.details.deactivated).to.include('ZZ-CI-SYNC Ghost Untracked||ZZ-CI'));",
+							"pm.test('admin-added game is not touched by the plan', () => {",
+							"  pm.expect(j.details.deactivated).to.not.include('ZZ-CI-SYNC Admin Game||ZZ-CI');",
+							"  pm.expect(j.skipped_deactivations.map(g => g.name)).to.not.include('ZZ-CI-SYNC Admin Game');",
+							"  pm.expect(j.details.updated.map(u => u.name)).to.not.include('ZZ-CI-SYNC Admin Game');",
+							"});"
+						]
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer {{admin_token}}"
+					}
+				],
+				"url": "{{base_url}}/gdt/admin/import/games?dryRun=true"
+			}
+		},
+		{
+			"name": "Preview wrote nothing",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							"pm.test('200', () => pm.response.to.have.status(200));",
+							"const j = pm.response.json();",
+							"const ghosts = j.games.filter(g => g.name.startsWith('ZZ-CI-SYNC '));",
+							"const by = n => ghosts.find(g => g.name === n);",
+							"pm.test('all 3 synthetic games are still active after a preview', () => {",
+							"  pm.expect(ghosts.length).to.eql(3);",
+							"  pm.expect(ghosts.every(g => g.is_active), 'is_active').to.eql(true);",
+							"});"
+						]
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer {{admin_token}}"
+					}
+				],
+				"url": "{{base_url}}/gdt/admin/games?search=ZZ-CI-SYNC&limit=50"
+			}
+		},
+		{
+			"name": "Real sync completes",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							"pm.test('200', () => pm.response.to.have.status(200));",
+							"const j = pm.response.json();",
+							"pm.test('is a real run', () => {",
+							"  pm.expect(j.dry_run).to.eql(false);",
+							"  pm.expect(j.message).to.eql('Import complete');",
+							"  pm.expect(j.total).to.be.above(300);",
+							"});",
+							"pm.test('deactivated at least the untracked ghost', () => pm.expect(j.deactivated).to.be.at.least(1));",
+							"pm.test('tracked ghost still reported as kept', () =>",
+							"  pm.expect(j.skipped_deactivations.map(g => g.name)).to.include('ZZ-CI-SYNC Ghost Tracked'));"
+						]
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer {{admin_token}}"
+					}
+				],
+				"url": "{{base_url}}/gdt/admin/import/games"
+			}
+		},
+		{
+			"name": "After sync: tracked survives, untracked deactivated, admin game untouched",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							"pm.test('200', () => pm.response.to.have.status(200));",
+							"const j = pm.response.json();",
+							"const ghosts = j.games.filter(g => g.name.startsWith('ZZ-CI-SYNC '));",
+							"const by = n => ghosts.find(g => g.name === n);",
+							"pm.test('tracked ghost is still ACTIVE and still upstream-managed', () => {",
+							"  pm.expect(by('ZZ-CI-SYNC Ghost Tracked').is_active).to.eql(true);",
+							"  pm.expect(by('ZZ-CI-SYNC Ghost Tracked').source).to.eql('game-time-master');",
+							"  pm.expect(by('ZZ-CI-SYNC Ghost Tracked').tracked_by).to.eql(1);",
+							"});",
+							"pm.test('untracked ghost was soft-deleted (row still exists)', () => {",
+							"  pm.expect(by('ZZ-CI-SYNC Ghost Untracked'), 'row exists').to.exist;",
+							"  pm.expect(by('ZZ-CI-SYNC Ghost Untracked').is_active).to.eql(false);",
+							"});",
+							"pm.test('admin game is untouched: still active, source NOT relabelled to game-time-master', () => {",
+							"  pm.expect(by('ZZ-CI-SYNC Admin Game').is_active).to.eql(true);",
+							"  pm.expect(by('ZZ-CI-SYNC Admin Game').source).to.eql('admin');",
+							"});"
+						]
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer {{admin_token}}"
+					}
+				],
+				"url": "{{base_url}}/gdt/admin/games?search=ZZ-CI-SYNC&limit=50"
+			}
+		},
+		{
+			"name": "Sync never deletes games",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							"pm.test('200', () => pm.response.to.have.status(200));",
+							"pm.test('total game rows did not go down (soft-delete only)', () => {",
+							"  const before = Number(pm.collectionVariables.get('games_total_before'));",
+							"  pm.expect(pm.response.json().total).to.be.at.least(before);",
+							"});"
+						]
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer {{admin_token}}"
+					}
+				],
+				"url": "{{base_url}}/gdt/admin/games?limit=1"
+			}
+		},
+		{
+			"name": "User still sees the tracked ghost in their list",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							"pm.test('200', () => pm.response.to.have.status(200));",
+							"pm.test('tracked game survived the sync', () =>",
+							"  pm.expect(pm.response.json().games.map(g => g.name)).to.include('ZZ-CI-SYNC Ghost Tracked'));"
+						]
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer {{user_token}}"
+					}
+				],
+				"url": "{{base_url}}/gdt/tracker/games"
+			}
+		},
+		{
+			"name": "Second sync is a no-op",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							"pm.test('200', () => pm.response.to.have.status(200));",
+							"const j = pm.response.json();",
+							"pm.test('nothing left to add, rename or deactivate', () => {",
+							"  pm.expect(j.added, 'added').to.eql(0);",
+							"  pm.expect(j.renamed, 'renamed').to.eql(0);",
+							"  pm.expect(j.deactivated, 'deactivated').to.eql(0);",
+							"});",
+							"pm.test('tracked ghost is still protected', () =>",
+							"  pm.expect(j.skipped_deactivations.map(g => g.name)).to.include('ZZ-CI-SYNC Ghost Tracked'));"
+						]
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer {{admin_token}}"
+					}
+				],
+				"url": "{{base_url}}/gdt/admin/import/games"
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "ghost_tracked_id",
+			"value": ""
+		},
+		{
+			"key": "ghost_untracked_id",
+			"value": ""
+		},
+		{
+			"key": "admin_game_id",
+			"value": ""
+		},
+		{
+			"key": "games_total_before",
+			"value": ""
+		}
+	]
+}
