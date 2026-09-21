@@ -1,6 +1,7 @@
 import axios from 'axios';
 import fs from 'fs/promises';
 import path from 'path';
+import vm from 'vm';
 
 interface GameData {
   game: string;
@@ -53,18 +54,31 @@ class GameDataService {
 
   /**
    * Always fetches live from upstream — no cache check.
-   * Use this for admin-triggered imports. Saves result as backup.
+   * Use this for admin-triggered imports. By default it saves the result as the
+   * local backup; pass { persist: false } to fetch without any side effects
+   * (dry-run preview, or when the caller wants to validate before persisting —
+   * see persistSync()).
    */
-  async fetchLiveFromSource(): Promise<GameData[]> {
+  async fetchLiveFromSource(options: { persist?: boolean } = {}): Promise<GameData[]> {
     const response = await axios.get(this.sourceUrl, {
       timeout: 10000,
       headers: { 'User-Agent': 'Gacha-Daily-Tracker/1.0' },
     });
     const gameData = this.parseGameDataFile(response.data);
-    this.lastFetch = new Date();
-    await this.saveBackup(gameData);
     console.log(`✅ Live fetch: ${gameData.length} games from upstream`);
+    if (options.persist !== false) {
+      await this.persistSync(gameData);
+    }
     return gameData;
+  }
+
+  /**
+   * Record a successful sync: remember the fetch time and save the data as the
+   * local fallback backup. Only call this with data that passed validation.
+   */
+  async persistSync(data: GameData[]): Promise<void> {
+    this.lastFetch = new Date();
+    await this.saveBackup(data);
   }
 
   /**
@@ -117,8 +131,11 @@ class GameDataService {
           .replace('var gameData = ', '')  // Remove variable declaration
           .replace(/;\s*$/, '');          // Remove trailing semicolon
 
-      // Safely evaluate the JavaScript array
-      const gameData = eval('(' + evalContent + ')');
+      // Evaluate the array literal in an empty, time-limited VM context (no access to
+      // require/process/globals), then round-trip through JSON so callers only ever
+      // see plain data from this realm.
+      const evaluated = vm.runInNewContext('(' + evalContent + ')', {}, { timeout: 2000 });
+      const gameData = JSON.parse(JSON.stringify(evaluated));
 
       // Validate data structure
       if (!Array.isArray(gameData) || gameData.length === 0) {

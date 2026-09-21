@@ -174,6 +174,13 @@ export const metadata: Metadata = {
 
 **Game data source:** `cicerakes/Game-Time-Master` (GPL-3.0). Data in `data/game-data-backup.json` is a modified JSON export of that repo's `game-data.js`. Icons from its `game-icons/` folder.
 
+**Upstream sync** (`POST /admin/import/games`, logic in `src/services/gameSyncService.ts`, admin UI: Preview changes / Sync from upstream on `/admin/games`). Built after an earlier sync wiped users' tracked games, so it is deliberately conservative:
+- **Never deletes from `games`** — rows are inserted, updated, renamed in place, or soft-deleted. `?dryRun=true` returns the full plan and writes nothing (same code path as a real run).
+- **Renames** go in `data/game-renames.json` (`"Old Name||Old Server": "New Name||New Server"`). The existing row is renamed in place so its `id` — and every `user_games` / `daily_completions` / `play_schedules` row pointing at it — is preserved. Check the dry run for games that disappeared upstream: if a tracked game was renamed rather than removed, add a pair here *before* syncing.
+- A game that any user tracks is **never deactivated**; it is listed in `skipped_deactivations` for the admin to review. Only `source = 'game-time-master'` rows are ever deactivated; admin/`user-submission` games are left alone and never re-labelled.
+- Guards: refuses (422) if upstream has < 80% of the currently-active upstream-managed games; skips + reports duplicate/invalid entries; upstream file is parsed in a `vm` sandbox, not `eval`. The local backup file is only refreshed after a successful commit.
+- **Tests:** pure planning rules live in `src/services/syncPlan.ts` (no DB imports) and are unit-tested by `npm run test:sync` (`test/sync/syncPlan.test.ts`). HTTP-level guarantees are in the Postman collection `test/postman/Test Game Sync.postman_collection.json`; it needs an admin JWT, so `test/ci/sync-test-setup.sh` creates the admin/regular users + synthetic `ZZ-CI-SYNC` games (and `sync-test-cleanup.sh` removes them). Both run in CI. To run locally, use a throwaway DB, never your prod copy — the collection performs a real sync.
+
 ---
 
 ## Database Schema (key tables)
@@ -236,8 +243,14 @@ CREATE INDEX IF NOT EXISTS idx_play_schedules_game_id ON play_schedules(game_id)
 ```bash
 # Backend (project root)
 npm run local        # Docker DB (.env)
-npm run dev          # Heroku DB (.env.development)
-npm run db-reset     # restart Docker postgres
+npm run dev          # Heroku DB (.env.development) — talks to PRODUCTION data; don't use for testing writes
+npm run db-reset     # restart Docker postgres (postgres:17, matches Heroku PG 17)
+
+# Realistic local data: back up prod (heroku pg:backups:capture + pg_dump -Fc into gitignored backups/),
+# then restore into Docker with pg_restore --no-owner --no-acl, skipping _heroku / EVENT TRIGGER /
+# EXTENSION entries (pg_restore -L filtered.list). ALWAYS scrub before running the app:
+#   UPDATE users SET email='user'||id||'@example.test'; TRUNCATE push_subscriptions, password_reset_tokens;
+# backups/ contains emails + password hashes — never commit it.
 
 # Frontend
 cd frontend

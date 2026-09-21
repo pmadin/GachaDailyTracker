@@ -10,7 +10,6 @@ import {
   softDeleteGame,
   restoreGame,
   hardDeleteGame,
-  importGames,
   patchIcons,
   uploadGameIcon,
   type AdminGame,
@@ -19,6 +18,99 @@ import {
 import SubmissionsBadge from '../_components/SubmissionsBadge';
 
 const PAGE_SIZE = 50;
+
+const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
+
+// Shape returned by POST /gdt/admin/import/games (see gameSyncService.ts SyncReport).
+interface SyncReport {
+  dry_run: boolean;
+  total: number;
+  added: number;
+  updated: number;
+  reactivated: number;
+  renamed: number;
+  deactivated: number;
+  unchanged: number;
+  skipped_deactivations: { id: number; name: string; server: string; tracked_by: number }[];
+  rename_conflicts: { from: string; to: string; reason: string }[];
+  invalid_entries: string[];
+  details: {
+    added: string[];
+    updated: { name: string; server: string; changes: string[] }[];
+    renamed: { id: number; from: string; to: string; tracked_by: number }[];
+    deactivated: string[];
+  };
+  last_synced_at: string | null;
+}
+
+// Kept local to this page (the shared api client has a fixed, older response type for this route).
+async function runUpstreamSync(token: string, dryRun: boolean): Promise<SyncReport> {
+  const res = await fetch(`${API}/gdt/admin/import/games${dryRun ? '?dryRun=true' : ''}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error ?? body.details ?? res.statusText);
+  return body as SyncReport;
+}
+
+function SyncReportPanel({ report }: { report: SyncReport }) {
+  const stat = (n: number, label: string) => (
+    <span key={label} className="text-zinc-400">
+      <span style={{ color: n > 0 ? '#e8c86a' : undefined }}>{n}</span> {label}
+    </span>
+  );
+  const list = (title: string, items: string[]) =>
+    items.length > 0 && (
+      <details className="mt-1">
+        <summary className="cursor-pointer text-zinc-500 hover:text-zinc-300">
+          {title} ({items.length})
+        </summary>
+        <ul className="ml-4 mt-1 list-disc space-y-0.5 text-zinc-500">
+          {items.map(i => <li key={i}>{i}</li>)}
+        </ul>
+      </details>
+    );
+
+  return (
+    <div className="mt-3 rounded-lg p-3 text-xs" style={{ border: '1px solid rgba(200,155,60,0.10)', background: 'var(--surface)' }}>
+      <p className="mb-1 font-semibold text-zinc-300">
+        {report.dry_run ? 'Preview — nothing was changed' : 'Sync complete'} · {report.total} games upstream
+      </p>
+      <p className="flex flex-wrap gap-x-3 gap-y-1">
+        {stat(report.added, 'added')}
+        {stat(report.updated, 'updated')}
+        {stat(report.renamed, 'renamed')}
+        {stat(report.deactivated, report.dry_run ? 'to deactivate' : 'deactivated')}
+        {stat(report.skipped_deactivations.length, 'kept (still tracked)')}
+        {stat(report.unchanged, 'unchanged')}
+      </p>
+
+      {report.skipped_deactivations.length > 0 && (
+        <div className="mt-2 rounded-md p-2" style={{ border: '1px solid rgba(200,155,60,0.28)' }}>
+          <p style={{ color: '#e8c86a' }}>
+            No longer listed upstream, but kept active because users track them — review these:
+          </p>
+          <ul className="ml-4 mt-1 list-disc text-zinc-400">
+            {report.skipped_deactivations.map(g => (
+              <li key={g.id}>
+                {g.name} <span className="text-zinc-500">({g.server})</span> — {g.tracked_by} user{g.tracked_by === 1 ? '' : 's'}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {report.rename_conflicts.length > 0 &&
+        list('Rename conflicts (skipped)', report.rename_conflicts.map(c => `${c.from} → ${c.to}: ${c.reason}`))}
+      {list('Renamed in place (tracking preserved)', report.details.renamed.map(r => `${r.from} → ${r.to} (${r.tracked_by} tracking)`))}
+      {list('Added', report.details.added)}
+      {list('Updated', report.details.updated.map(u => `${u.name} (${u.server}): ${u.changes.join('; ')}`))}
+      {list(report.dry_run ? 'Would deactivate (no one tracks these)' : 'Deactivated (no one tracked these)', report.details.deactivated)}
+      {list('Skipped invalid upstream entries', report.invalid_entries)}
+    </div>
+  );
+}
 
 type SortCol = 'name' | 'server' | 'timezone' | 'daily_reset' | 'tracked_by' | 'is_active';
 type SortDir = 'asc' | 'desc';
@@ -221,6 +313,8 @@ export default function AdminGamesPage() {
 
   const [importLoading, setImportLoading] = useState(false);
   const [importResult, setImportResult] = useState('');
+  const [syncReport, setSyncReport] = useState<SyncReport | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
   const [lastSynced, setLastSynced] = useState<string | null>(null);
   const [patchLoading, setPatchLoading] = useState(false);
   const [patchResult, setPatchResult] = useState('');
@@ -330,15 +424,30 @@ export default function AdminGamesPage() {
     if (!token) return;
     setImportLoading(true);
     setImportResult('');
+    setSyncReport(null);
     try {
-      const res = await importGames(token);
-      setImportResult(`${res.total} games synced · ${res.added} added · ${res.updated} updated`);
-      setLastSynced(new Date(res.last_synced_at).toLocaleString());
+      const res = await runUpstreamSync(token, false);
+      setSyncReport(res);
+      if (res.last_synced_at) setLastSynced(new Date(res.last_synced_at).toLocaleString());
       await load();
     } catch (err: unknown) {
       setImportResult(`Error: ${err instanceof Error ? err.message : 'Import failed'}`);
     } finally {
       setImportLoading(false);
+    }
+  };
+
+  const handlePreview = async () => {
+    if (!token) return;
+    setPreviewLoading(true);
+    setImportResult('');
+    setSyncReport(null);
+    try {
+      setSyncReport(await runUpstreamSync(token, true));
+    } catch (err: unknown) {
+      setImportResult(`Error: ${err instanceof Error ? err.message : 'Preview failed'}`);
+    } finally {
+      setPreviewLoading(false);
     }
   };
 
@@ -411,15 +520,22 @@ export default function AdminGamesPage() {
         </p>
         <div className="flex flex-wrap gap-2">
           <button
+            onClick={handlePreview}
+            disabled={previewLoading || importLoading || patchLoading}
+            className="rounded-lg border border-[rgba(200,155,60,0.15)] px-3 py-1.5 text-sm text-[#9a8570] transition-colors hover:border-[rgba(200,155,60,0.3)] hover:text-[#f0ede8] disabled:opacity-40"
+          >
+            {previewLoading ? 'Checking…' : 'Preview changes'}
+          </button>
+          <button
             onClick={handleImport}
-            disabled={importLoading || patchLoading}
+            disabled={importLoading || previewLoading || patchLoading}
             className="rounded-lg border border-[rgba(200,155,60,0.15)] px-3 py-1.5 text-sm text-[#9a8570] transition-colors hover:border-[rgba(200,155,60,0.3)] hover:text-[#f0ede8] disabled:opacity-40"
           >
             {importLoading ? 'Syncing…' : 'Sync from upstream'}
           </button>
           <button
             onClick={handlePatchIcons}
-            disabled={patchLoading || importLoading}
+            disabled={patchLoading || importLoading || previewLoading}
             className="rounded-lg border border-[rgba(200,155,60,0.15)] px-3 py-1.5 text-sm text-[#9a8570] transition-colors hover:border-[rgba(200,155,60,0.3)] hover:text-[#f0ede8] disabled:opacity-40"
           >
             {patchLoading ? 'Auditing…' : 'Verify Icons'}
@@ -429,8 +545,9 @@ export default function AdminGamesPage() {
           Icons are served directly from the Game-Time-Master repository. Use &quot;Verify Icons&quot; to check which games are missing icon references in the database.
         </p>
         {importResult && (
-          <p className="mt-2 text-xs text-zinc-400">{importResult}</p>
+          <p className={`mt-2 text-xs ${importResult.startsWith('Error') ? 'text-red-400' : 'text-zinc-400'}`}>{importResult}</p>
         )}
+        {syncReport && <SyncReportPanel report={syncReport} />}
         {lastSynced && (
           <p className="mt-1 text-xs text-zinc-500">
             Last synced from upstream: <span className="text-zinc-400">{lastSynced}</span>

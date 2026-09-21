@@ -26,7 +26,7 @@ jobs:
     # Spin up a local Postgres alongside the test runner
     services:
       postgres:
-        image: postgres:15
+        image: postgres:17 # match Heroku Postgres 17 and docker-compose.yml
         env:
           POSTGRES_DB: gacha_tracker
           POSTGRES_USER: developer
@@ -58,6 +58,10 @@ jobs:
 
       - name: Build TypeScript
         run: npm run build
+
+      # Pure unit tests for the upstream-sync planner (no database or network needed)
+      - name: "Unit tests: sync planner"
+        run: npm run test:sync
 
       # Start the API in the background; auto-import will seed game data on startup
       - name: Start API server
@@ -118,3 +122,40 @@ jobs:
           newman run "test/postman/Test New Features.postman_collection.json" \
             --environment "test/postman/Local-gacha-daily-tracker.postman_environment.json" \
             --reporters cli
+
+      # --- Upstream game sync (POST /gdt/admin/import/games) ---
+      # Needs an admin user, which can only be created by bumping the role in SQL, so a script
+      # prepares an admin + a regular user + synthetic games and hands us their JWTs.
+      - name: "Prepare: admin/regular test users + synthetic games for the sync tests"
+        env:
+          REGISTRATION_TOKEN: ${{ secrets.REGISTRATION_TOKEN }}
+          BASE_URL: http://localhost:4000
+          PGHOST: localhost
+          PGUSER: developer
+          PGPASSWORD: devpassword
+          PGDATABASE: gacha_tracker
+        run: |
+          # Redirect to a file (not eval "$(...)") so a failing setup fails this step.
+          bash test/ci/sync-test-setup.sh > /tmp/sync-env.sh
+          source /tmp/sync-env.sh
+          echo "::add-mask::$ADMIN_TOKEN"
+          echo "::add-mask::$USER_TOKEN"
+          echo "ADMIN_TOKEN=$ADMIN_TOKEN" >> "$GITHUB_ENV"
+          echo "USER_TOKEN=$USER_TOKEN" >> "$GITHUB_ENV"
+
+      - name: "Test: Game Sync (tracked games survive, preview writes nothing, nothing deleted)"
+        run: |
+          newman run "test/postman/Test Game Sync.postman_collection.json" \
+            --environment "test/postman/Local-gacha-daily-tracker.postman_environment.json" \
+            --env-var "admin_token=$ADMIN_TOKEN" \
+            --env-var "user_token=$USER_TOKEN" \
+            --reporters cli
+
+      - name: Clean up sync test data
+        if: always()
+        env:
+          PGHOST: localhost
+          PGUSER: developer
+          PGPASSWORD: devpassword
+          PGDATABASE: gacha_tracker
+        run: bash test/ci/sync-test-cleanup.sh

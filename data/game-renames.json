@@ -1,0 +1,6 @@
+{
+  "_comment": "Maps 'Old Name||Old Server' -> 'New Name||New Server' for games upstream (Game-Time-Master) renamed. The sync renames the existing row IN PLACE (same game id) so users' tracked games, completions, schedules and streaks are preserved. A pair is only applied when the old key is gone from upstream, the new key is present in upstream, and the new key doesn't already exist in the DB. Keys starting with '_' are ignored.",
+  "Cookie Run: Kingdom||Global": "CookieRun: Kingdom||Global",
+  "Granblue Fantasy||JP & EN": "Granblue Fantasy||Global",
+  "Lovebrush Chronicles||EN": "Lovebrush Chronicles||Global"
+}

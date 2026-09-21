@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:15
+    image: postgres:17
     container_name: gacha_tracker_db
     environment:
       POSTGRES_DB: gacha_tracker
