@@ -83,6 +83,7 @@ The entire UI uses a warm black-and-gold palette. **There is no purple/violet an
 - `/login`, `/register` — Auth forms with kintsugi vein SVG background (see below).
 - `/privacy-policy`, `/terms-of-service` — Static legal pages (prose rewrite in V3.5, no lists, gold headings/links).
 - `/admin/games` — Admin game management: search with 400ms debounce autocomplete, windowed Pagination component, sortable columns.
+- `/admin/analytics` — Stats/analytics panel: KPI row, signup/completion trends (range presets 7d/30d/90d/1y/all — not capped at 30 days like a free-tier traffic-analytics plan, since it's our own DB), top streaks, most-tracked games, region popularity (by each game's own server region), users-by-country (derived from timezone via `countries-and-timezones`, approximate). Charts are `recharts`; shared building blocks are `admin/_components/{RankedBarChart,TrendChart,StatTile,ChartCard}.tsx`. Every chart has a "View as table" twin. Single-hue gold marks throughout (all series are single-series magnitude/ordinal, never a multi-hue identity palette) — see `src/routes/admin/analytics.ts` for the region-grouping/country-mapping logic.
 
 **Key components:**
 - `DashboardCard` — shows icon, name, server tag (`displayServer`), countdown (hidden when done), local reset time. Accepts optional `dragHandle` prop.
@@ -165,6 +166,7 @@ export const metadata: Metadata = {
 - Game mgmt (JWT): `/update/games/:id`, `/update/add/game`, `/update/delete/game/:id`, `/update/games/import`
 - Submissions: `/submissions` (POST — create suggestion, JWT), `/admin/submissions` (GET — list, role 3+), `/admin/submissions/:id` (PATCH — approve/reject, role 3+)
 - Admin (role 3+): `/admin/users/role/:username`, `/admin/users`, `/admin/users/search`
+- Analytics (role 3+): `/admin/analytics` (GET, `?days=7|30|90|365|all`)
 - Leaderboard: `/leaderboard/status` (public), `/leaderboard` (public, paginated), `/leaderboard/visibility` (GET/PATCH, JWT)
 - Notifications (JWT): `/notifications/preferences` (GET/PATCH), `/notifications/email-preferences` (GET/PATCH), `/notifications/subscribe` (POST), `/notifications/unsubscribe` (DELETE), `/notifications/apply-default` (POST)
 - Admin settings (role 3+): `/admin/settings` (GET), `/admin/settings/leaderboard` (PATCH)
@@ -281,6 +283,7 @@ heroku pg:psql -a gachadailytracker
 - **Home page CLS fix**: while auth resolves, the top section renders a `min-height: 220px` animate-pulse skeleton instead of a blank div so the Popular Games and Features sections below never shift position.
 - **`/games` GamesClient skip-first-load**: a `useRef(initialGames.length > 0)` flag skips the mount `useEffect` fetch when SSR already provided data, preventing a redundant duplicate API call on hydration.
 - **Admin games search debounce**: 400ms `useEffect` on `search` state triggers `setSubmittedSearch` and resets `page` to 0 — matches the games browser pattern. No form submit needed.
+- **Admin user emails are masked server-side** (`src/utils/mask.ts`, applied in `GET /admin/users`, `GET /admin/users/search`, `PATCH /admin/users/role/:username`) — e.g. `begino4315@gzeos.com` → `b********5@gzeos.com`. Domain stays visible, local part doesn't; done in the API response itself (not just the UI) so a compromised admin token can't bulk-scrape raw emails. Search still matches the real address underneath. `/admin/users` also paginates properly now (`LIMIT`/`OFFSET` + a real `COUNT(*)` for `total`) — it used to ignore `limit`/`offset` entirely and return every matching row on every page.
 - **Navbar `xl:` breakpoint**: hamburger uses `xl:hidden` / `xl:flex` (1280px), not `lg:`. 2K monitors at 150–200% DPI scaling bring logical CSS pixels below 1024px, making `lg:` insufficient.
 - **Warm near-black**: `rgba(13,11,8,...)` matches the site's `#0d0b08` base. Avoid `rgba(10,10,15,...)` — the higher blue channel creates a visible cool/blue tint against the warm gold accents.
 - **placeholder.svg path**: components reference `/icons/placeholder.svg` — the file lives at `frontend/public/icons/placeholder.svg`. A copy also exists at `frontend/public/placeholder.svg`.

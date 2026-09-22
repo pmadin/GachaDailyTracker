@@ -17,6 +17,7 @@ import { adminGamesRouter } from './routes/admin/games';
 import { submissionsRouter, adminSubmissionsRouter } from './routes/submissions';
 import leaderboardRouter from './routes/leaderboard';
 import adminSettingsRouter from './routes/admin/settings';
+import analyticsRouter from './routes/admin/analytics';
 import { authenticateToken } from './middleware/auth';
 import { initWebPush } from './config/webpush';
 import { startNotificationCron } from './workers/notificationCron';
@@ -150,6 +151,7 @@ app.use('/gdt/submissions', authenticateToken, submissionsRouter);
 app.use('/gdt/admin', adminSubmissionsRouter);
 app.use('/gdt/leaderboard', leaderboardRouter);
 app.use('/gdt/admin', adminSettingsRouter);
+app.use('/gdt/admin', analyticsRouter);
 app.use('/gdt/schedule', authenticateToken, scheduleRouter);
 
 /**

@@ -1,6 +1,7 @@
 import express, { Request, Response, Router } from 'express';
 import database from '../../config/database';
 import { requireAdmin, ROLES, getRoleName } from '../../middleware/admin';
+import { maskEmail } from '../../utils/mask';
 import '../../middleware/auth';
 
 const roleRouter: Router = express.Router();
@@ -37,7 +38,7 @@ const roleRouter: Router = express.Router();
  *                 description: Reason for role change
  *     responses:
  *       200:
- *         description: Role updated successfully
+ *         description: Role updated successfully. The returned user.email is masked (e.g. "b********5@gzeos.com").
  *       403:
  *         description: Insufficient permissions
  *       404:
@@ -105,7 +106,7 @@ roleRouter.patch('/users/role/:username', requireAdmin, async (req: Request, res
             [newRole, targetUser.id]
         );
 
-        // Log the role change
+        // Log the role change (server log only — full email never leaves this process)
         console.log(`🔐 Role changed by ${adminUser.username}: ${targetUser.username} (${targetUser.email}) from role ${targetUser.role} to ${newRole}. Reason: ${reason || 'No reason provided'}`);
 
         res.json({
@@ -113,7 +114,7 @@ roleRouter.patch('/users/role/:username', requireAdmin, async (req: Request, res
             user: {
                 id: targetUser.id,
                 username: targetUser.username,
-                email: targetUser.email,
+                email: maskEmail(targetUser.email),
                 oldRole: targetUser.role,
                 newRole: newRole,
                 oldRoleName: getRoleName(targetUser.role),
@@ -151,9 +152,23 @@ roleRouter.patch('/users/role/:username', requireAdmin, async (req: Request, res
  *         schema:
  *           type: string
  *         description: Search by username or email (optional)
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 20
+ *         description: Max rows to return (1-100)
+ *       - in: query
+ *         name: offset
+ *         schema:
+ *           type: integer
+ *           default: 0
  *     responses:
  *       200:
- *         description: List of all users with role information
+ *         description: |
+ *           Page of users with role information. total is the full filtered count, not the page size.
+ *           email is masked (e.g. "b********5@gzeos.com") — the domain is kept but the local part is
+ *           redacted, even here at the API, so a compromised admin token can't bulk-scrape raw emails.
  *         content:
  *           application/json:
  *             schema:
@@ -174,6 +189,8 @@ roleRouter.patch('/users/role/:username', requireAdmin, async (req: Request, res
  *                         type: integer
  *                       roleName:
  *                         type: string
+ *                       streak_count:
+ *                         type: integer
  *                       created_at:
  *                         type: string
  *                 total:
@@ -183,37 +200,50 @@ roleRouter.patch('/users/role/:username', requireAdmin, async (req: Request, res
  */
 roleRouter.get('/users', requireAdmin, async (req: Request, res: Response) => {
     try {
-        const { role, search } = req.query;
+        const { role, search, limit, offset } = req.query;
 
-        let query = `
-            SELECT id, username, email, role, timezone, created_at, updated_at
-            FROM users
-            WHERE 1=1
-        `;
+        // Validate limit (min: 1, max: 100, default: 20) and offset (min: 0, default: 0) —
+        // same convention as GET /gdt/games.
+        let validatedLimit = parseInt(limit as string) || 20;
+        if (validatedLimit < 1) validatedLimit = 1;
+        if (validatedLimit > 100) validatedLimit = 100;
 
+        let validatedOffset = parseInt(offset as string) || 0;
+        if (validatedOffset < 0) validatedOffset = 0;
+
+        let where = 'WHERE 1=1';
         const params: any[] = [];
         let paramIndex = 1;
 
         // Add role filter
         if (role) {
-            query += ` AND role = $${paramIndex}`;
+            where += ` AND role = $${paramIndex}`;
             params.push(parseInt(role as string));
             paramIndex++;
         }
 
         // Add search filter
         if (search) {
-            query += ` AND (username ILIKE $${paramIndex} OR email ILIKE $${paramIndex})`;
+            where += ` AND (username ILIKE $${paramIndex} OR email ILIKE $${paramIndex})`;
             params.push(`%${search}%`);
             paramIndex++;
         }
 
-        query += ` ORDER BY role DESC, created_at DESC`;
-
-        const usersResult = await database.query(query, params);
+        const [countResult, usersResult] = await Promise.all([
+            database.query(`SELECT COUNT(*) FROM users ${where}`, params),
+            database.query(
+                `SELECT id, username, email, role, timezone, streak_count, created_at, updated_at
+                 FROM users
+                 ${where}
+                 ORDER BY role DESC, created_at DESC
+                 LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
+                [...params, validatedLimit, validatedOffset]
+            ),
+        ]);
 
         const users = usersResult.rows.map(user => ({
             ...user,
+            email: maskEmail(user.email),
             roleName: getRoleName(user.role),
             // Don't expose password_hash or sensitive info
             password_hash: undefined
@@ -221,7 +251,7 @@ roleRouter.get('/users', requireAdmin, async (req: Request, res: Response) => {
 
         res.json({
             users,
-            total: users.length,
+            total: parseInt(countResult.rows[0].count, 10),
             requestedBy: req.user!.username,
             filters: {
                 role: role || 'all',
@@ -254,7 +284,7 @@ roleRouter.get('/users', requireAdmin, async (req: Request, res: Response) => {
  *         example: "test"
  *     responses:
  *       200:
- *         description: Search results
+ *         description: Search results. email is masked (see GET /gdt/admin/users); search still matches the real address.
  */
 roleRouter.get('/users/search', requireAdmin, async (req: Request, res: Response) => {
     try {
@@ -286,6 +316,7 @@ roleRouter.get('/users/search', requireAdmin, async (req: Request, res: Response
 
         const users = searchResult.rows.map(user => ({
             ...user,
+            email: maskEmail(user.email),
             roleName: getRoleName(user.role)
         }));
 

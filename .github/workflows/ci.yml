@@ -63,6 +63,10 @@ jobs:
       - name: "Unit tests: sync planner"
         run: npm run test:sync
 
+      # Pure unit tests for the admin-facing email mask (no database or network needed)
+      - name: "Unit tests: email mask"
+        run: npm run test:mask
+
       # Start the API in the background; auto-import will seed game data on startup
       - name: Start API server
         env:

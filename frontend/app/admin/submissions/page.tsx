@@ -3,6 +3,8 @@
 import { useState, useEffect, useCallback, FormEvent } from 'react';
 import { useAuth } from '../../_context/AuthContext';
 import Pagination from '../../_components/Pagination';
+import SortIcon, { type SortDir } from '../../_components/SortIcon';
+import { sortRows } from '../../_lib/sort';
 import {
   fetchAdminSubmissions,
   reviewSubmission,
@@ -10,6 +12,8 @@ import {
 } from '../../_lib/api';
 
 const PAGE_SIZE = 20;
+
+type SortCol = 'name' | 'server' | 'timezone' | 'daily_reset' | 'submitter_role' | 'created_at';
 
 const STATUS_TABS = ['pending', 'approved', 'rejected', 'all'] as const;
 type StatusFilter = (typeof STATUS_TABS)[number];
@@ -139,6 +143,22 @@ export default function AdminSubmissionsPage() {
   const [lastActionApproved, setLastActionApproved] = useState(false);
   const [expandedCell, setExpandedCell] = useState<{ id: number; field: 'notes' | 'review' } | null>(null);
 
+  // Matches the server's default ORDER BY gs.created_at DESC so the table doesn't
+  // visibly re-order itself on first load.
+  const [sortCol, setSortCol] = useState<SortCol>('created_at');
+  const [sortDir, setSortDir] = useState<SortDir>('desc');
+
+  const handleSort = (col: SortCol) => {
+    if (sortCol === col) {
+      setSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortCol(col);
+      setSortDir('asc');
+    }
+  };
+
+  const sortedSubmissions = sortRows(submissions, s => s[sortCol], sortDir);
+
   const isExpanded = (id: number, field: 'notes' | 'review') =>
     expandedCell?.id === id && expandedCell.field === field;
   const toggleExpand = (id: number, field: 'notes' | 'review') =>
@@ -248,13 +268,35 @@ export default function AdminSubmissionsPage() {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-[rgba(200,155,60,0.10)] bg-[rgba(13,11,8,0.8)] text-left text-xs text-[#4a3d2a]">
-              <th className="px-4 py-3 font-medium">Game</th>
-              <th className="px-4 py-3 font-medium">Server</th>
-              <th className="hidden px-4 py-3 font-medium md:table-cell">Timezone</th>
-              <th className="px-4 py-3 font-medium">Reset</th>
-              <th className="px-4 py-3 font-medium">By</th>
+              {(
+                [
+                  { col: 'name' as SortCol, label: 'Game', cls: '' },
+                  { col: 'server' as SortCol, label: 'Server', cls: '' },
+                  { col: 'timezone' as SortCol, label: 'Timezone', cls: 'hidden md:table-cell' },
+                  { col: 'daily_reset' as SortCol, label: 'Reset', cls: '' },
+                  { col: 'submitter_role' as SortCol, label: 'By', cls: '' },
+                ] as { col: SortCol; label: string; cls: string }[]
+              ).map(({ col, label, cls }) => (
+                <th key={col} className={`px-4 py-3 font-medium ${cls}`}>
+                  <button
+                    onClick={() => handleSort(col)}
+                    className="flex items-center whitespace-nowrap hover:text-zinc-300 transition-colors"
+                  >
+                    {label}
+                    <SortIcon active={sortCol === col} dir={sortDir} />
+                  </button>
+                </th>
+              ))}
               <th className="hidden px-4 py-3 font-medium lg:table-cell">Notes</th>
-              <th className="px-4 py-3 font-medium">Date</th>
+              <th className="px-4 py-3 font-medium">
+                <button
+                  onClick={() => handleSort('created_at')}
+                  className="flex items-center whitespace-nowrap hover:text-zinc-300 transition-colors"
+                >
+                  Date
+                  <SortIcon active={sortCol === 'created_at'} dir={sortDir} />
+                </button>
+              </th>
               <th className="px-4 py-3 font-medium">Actions</th>
             </tr>
           </thead>
@@ -276,7 +318,7 @@ export default function AdminSubmissionsPage() {
                 </td>
               </tr>
             ) : (
-              submissions.map(sub => (
+              sortedSubmissions.map(sub => (
                 <tr
                   key={sub.id}
                   className="border-b border-[rgba(200,155,60,0.06)] transition-colors hover:bg-[rgba(200,155,60,0.04)]"

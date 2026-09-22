@@ -447,6 +447,74 @@ export async function fetchAdminSubmissions(
   return apiFetch(`/gdt/admin/submissions?${q}`, { headers: authHeader(token) });
 }
 
+// ─── Analytics ────────────────────────────────────────────────────────────────
+
+export type AnalyticsRangeDays = '7' | '30' | '90' | '365' | 'all';
+
+export interface AnalyticsSummary {
+  total_users: number;
+  total_active_games: number;
+  total_tracked_rows: number;
+  total_completions: number;
+  users_with_streak: number;
+  avg_games_per_user: number;
+}
+
+export interface RoleCount {
+  role: number;
+  role_name: string;
+  count: number;
+}
+
+export interface TopStreak {
+  username: string;
+  streak_count: number;
+  games_tracked: number;
+}
+
+export interface TopGame {
+  id: number;
+  name: string;
+  server: string;
+  tracked_by: number;
+}
+
+export interface RegionPopularity {
+  region: string;
+  tracked_count: number;
+  game_count: number;
+}
+
+export interface TimezoneCountry {
+  country: string;
+  count: number;
+}
+
+export interface TrendBucket {
+  date: string;
+  count: number;
+  cumulative?: number;
+}
+
+export interface AnalyticsResponse {
+  summary: AnalyticsSummary;
+  role_distribution: RoleCount[];
+  top_streaks: TopStreak[];
+  top_games: TopGame[];
+  region_popularity: RegionPopularity[];
+  timezone_breakdown: TimezoneCountry[];
+  signups_over_time: TrendBucket[];
+  completions_over_time: TrendBucket[];
+  range: { days: number | null; bucket: 'day' | 'week' | 'month' };
+}
+
+export async function fetchAdminAnalytics(
+  token: string,
+  days: AnalyticsRangeDays = '90',
+): Promise<AnalyticsResponse> {
+  return apiFetch(`/gdt/admin/analytics?days=${days}`, { headers: authHeader(token) });
+}
+
 // ─── Leaderboard ─────────────────────────────────────────────────────────────
 
 export interface LeaderboardEntry {

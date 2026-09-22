@@ -3,6 +3,8 @@
 import { useState, useEffect, useCallback, useRef, FormEvent } from 'react';
 import { useAuth } from '../../_context/AuthContext';
 import Pagination from '../../_components/Pagination';
+import SortIcon, { type SortDir } from '../../_components/SortIcon';
+import { sortRows } from '../../_lib/sort';
 import {
   fetchAdminGames,
   createAdminGame,
@@ -113,28 +115,6 @@ function SyncReportPanel({ report }: { report: SyncReport }) {
 }
 
 type SortCol = 'name' | 'server' | 'timezone' | 'daily_reset' | 'tracked_by' | 'is_active';
-type SortDir = 'asc' | 'desc';
-
-function SortIcon({ active, dir }: { active: boolean; dir: SortDir }) {
-  const col = active ? '#e8c86a' : '#4a3d2a';
-  if (!active) {
-    return (
-      <svg width="9" height="12" viewBox="0 0 9 12" fill="none" className="ml-1 inline-block align-middle">
-        <path d="M4.5 1L8 5H1L4.5 1Z" fill={col}/>
-        <path d="M4.5 11L1 7H8L4.5 11Z" fill={col}/>
-      </svg>
-    );
-  }
-  return (
-    <svg width="9" height="8" viewBox="0 0 9 8" fill="none" className="ml-1 inline-block align-middle">
-      {dir === 'asc' ? (
-        <path d="M1 6.5L4.5 2L8 6.5" stroke={col} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-      ) : (
-        <path d="M1 1.5L4.5 6L8 1.5" stroke={col} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-      )}
-    </svg>
-  );
-}
 
 // ─── Game form modal (add + edit) ─────────────────────────────────────────────
 function GameFormModal({
@@ -334,17 +314,7 @@ export default function AdminGamesPage() {
     }
   };
 
-  const sortedGames = [...games].sort((a, b) => {
-    let cmp = 0;
-    if (sortCol === 'tracked_by') {
-      cmp = a.tracked_by - b.tracked_by;
-    } else if (sortCol === 'is_active') {
-      cmp = Number(a.is_active) - Number(b.is_active);
-    } else {
-      cmp = (a[sortCol] ?? '').localeCompare(b[sortCol] ?? '');
-    }
-    return sortDir === 'asc' ? cmp : -cmp;
-  });
+  const sortedGames = sortRows(games, g => g[sortCol], sortDir);
 
   const load = useCallback(async () => {
     if (!token) return;

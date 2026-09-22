@@ -38,6 +38,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             Admin
           </span>
           {navLink('/admin', 'Overview')}
+          {navLink('/admin/analytics', 'Analytics')}
           {navLink('/admin/games', 'Games')}
           {navLink('/admin/users', 'Users')}
           {navLink('/admin/submissions', 'Submissions')}
