@@ -3,6 +3,8 @@
 import { useState, useEffect, useCallback, FormEvent } from 'react';
 import { useAuth } from '../../_context/AuthContext';
 import Pagination from '../../_components/Pagination';
+import SortIcon, { type SortDir } from '../../_components/SortIcon';
+import { sortRows } from '../../_lib/sort';
 import {
   fetchAdminUsers,
   searchAdminUsers,
@@ -11,6 +13,8 @@ import {
 } from '../../_lib/api';
 
 const PAGE_SIZE = 20;
+
+type SortCol = 'username' | 'email' | 'role' | 'streak_count' | 'timezone' | 'created_at';
 
 const ROLE_LABELS: Record<number, string> = {
   1: 'User',
@@ -168,6 +172,22 @@ export default function AdminUsersPage() {
   const [roleTarget, setRoleTarget] = useState<AdminUser | null>(null);
   const [roleSuccessId, setRoleSuccessId] = useState<number | null>(null);
 
+  // Matches the server's default ORDER BY role DESC, created_at DESC so the table
+  // doesn't visibly re-order itself on first load.
+  const [sortCol, setSortCol] = useState<SortCol>('role');
+  const [sortDir, setSortDir] = useState<SortDir>('desc');
+
+  const handleSort = (col: SortCol) => {
+    if (sortCol === col) {
+      setSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortCol(col);
+      setSortDir('asc');
+    }
+  };
+
+  const sortedUsers = sortRows(users, u => u[sortCol], sortDir);
+
   const isSearchMode = activeSearch.length > 0;
 
   const load = useCallback(async () => {
@@ -296,12 +316,26 @@ export default function AdminUsersPage() {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-[rgba(200,155,60,0.10)] bg-[rgba(13,11,8,0.8)] text-left text-xs text-[#4a3d2a]">
-              <th className="px-4 py-3 font-medium">Username</th>
-              <th className="hidden px-4 py-3 font-medium sm:table-cell">Email</th>
-              <th className="px-4 py-3 font-medium">Role</th>
-              <th className="hidden px-4 py-3 font-medium sm:table-cell">Streak</th>
-              <th className="hidden px-4 py-3 font-medium md:table-cell">Timezone</th>
-              <th className="hidden px-4 py-3 font-medium sm:table-cell">Joined</th>
+              {(
+                [
+                  { col: 'username' as SortCol, label: 'Username', cls: '' },
+                  { col: 'email' as SortCol, label: 'Email', cls: 'hidden sm:table-cell' },
+                  { col: 'role' as SortCol, label: 'Role', cls: '' },
+                  { col: 'streak_count' as SortCol, label: 'Streak', cls: 'hidden sm:table-cell' },
+                  { col: 'timezone' as SortCol, label: 'Timezone', cls: 'hidden md:table-cell' },
+                  { col: 'created_at' as SortCol, label: 'Joined', cls: 'hidden sm:table-cell' },
+                ] as { col: SortCol; label: string; cls: string }[]
+              ).map(({ col, label, cls }) => (
+                <th key={col} className={`px-4 py-3 font-medium ${cls}`}>
+                  <button
+                    onClick={() => handleSort(col)}
+                    className="flex items-center whitespace-nowrap hover:text-zinc-300 transition-colors"
+                  >
+                    {label}
+                    <SortIcon active={sortCol === col} dir={sortDir} />
+                  </button>
+                </th>
+              ))}
               <th className="px-4 py-3 font-medium">Actions</th>
             </tr>
           </thead>
@@ -325,7 +359,7 @@ export default function AdminUsersPage() {
                 </td>
               </tr>
             ) : (
-              users.map(u => (
+              sortedUsers.map(u => (
                 <tr
                   key={u.id}
                   className="border-b border-[rgba(200,155,60,0.06)] transition-colors hover:bg-[rgba(200,155,60,0.04)]"

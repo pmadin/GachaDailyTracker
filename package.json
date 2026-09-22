@@ -12,6 +12,7 @@
     "prod": "nodemon -r dotenv/config src/index.ts dotenv_config_path=.env.production",
     "test": "jest",
     "test:sync": "ts-node --transpile-only test/sync/syncPlan.test.ts",
+    "test:mask": "ts-node --transpile-only test/utils/mask.test.ts",
     "kill": "npx kill-port 3000 4000",
     "download-game-data": "node scripts/download-game-data.js",
     "convert-to-csv": "node scripts/convert-json-to-csv.js",
