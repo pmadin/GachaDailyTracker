@@ -32,6 +32,28 @@ export default function AdminOverviewPage() {
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Link
+          href="/admin/analytics"
+          className="kintsugi-card group rounded-xl p-6 transition-colors"
+          style={{ border: '1px solid rgba(200,155,60,0.12)', background: 'var(--bg2)' }}
+        >
+          <div
+            className="mb-4 flex h-10 w-10 items-center justify-center rounded-lg"
+            style={{ background: 'rgba(200,155,60,0.10)', border: '1px solid rgba(200,155,60,0.20)' }}
+          >
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+              <path d="M4 20V10M11 20V4M18 20v-7" stroke="#c8913c" strokeWidth="1.5" strokeLinecap="round"/>
+              <path d="M4 20h16" stroke="#c8913c" strokeWidth="1.5" strokeLinecap="round" opacity="0.4"/>
+            </svg>
+          </div>
+          <h2 className="mb-1 text-base font-semibold text-white group-hover:text-[#e8c86a] transition-colors">
+            Analytics
+          </h2>
+          <p className="text-sm text-zinc-500">
+            Streaks, most-tracked games, region and country breakdowns, signup and activity trends.
+          </p>
+        </Link>
+
+        <Link
           href="/admin/games"
           className="kintsugi-card group rounded-xl p-6 transition-colors"
           style={{ border: '1px solid rgba(200,155,60,0.12)', background: 'var(--bg2)' }}

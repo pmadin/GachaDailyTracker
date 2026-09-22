@@ -83,6 +83,7 @@ The entire UI uses a warm black-and-gold palette. **There is no purple/violet an
 - `/login`, `/register` — Auth forms with kintsugi vein SVG background (see below).
 - `/privacy-policy`, `/terms-of-service` — Static legal pages (prose rewrite in V3.5, no lists, gold headings/links).
 - `/admin/games` — Admin game management: search with 400ms debounce autocomplete, windowed Pagination component, sortable columns.
+- `/admin/analytics` — Stats/analytics panel: KPI row, signup/completion trends (range presets 7d/30d/90d/1y/all — not capped at 30 days like a free-tier traffic-analytics plan, since it's our own DB), top streaks, most-tracked games, region popularity (by each game's own server region), users-by-country (derived from timezone via `countries-and-timezones`, approximate). Charts are `recharts`; shared building blocks are `admin/_components/{RankedBarChart,TrendChart,StatTile,ChartCard}.tsx`. Every chart has a "View as table" twin. Single-hue gold marks throughout (all series are single-series magnitude/ordinal, never a multi-hue identity palette) — see `src/routes/admin/analytics.ts` for the region-grouping/country-mapping logic.
 
 **Key components:**
 - `DashboardCard` — shows icon, name, server tag (`displayServer`), countdown (hidden when done), local reset time. Accepts optional `dragHandle` prop.
@@ -165,6 +166,7 @@ export const metadata: Metadata = {
 - Game mgmt (JWT): `/update/games/:id`, `/update/add/game`, `/update/delete/game/:id`, `/update/games/import`
 - Submissions: `/submissions` (POST — create suggestion, JWT), `/admin/submissions` (GET — list, role 3+), `/admin/submissions/:id` (PATCH — approve/reject, role 3+)
 - Admin (role 3+): `/admin/users/role/:username`, `/admin/users`, `/admin/users/search`
+- Analytics (role 3+): `/admin/analytics` (GET, `?days=7|30|90|365|all`)
 - Leaderboard: `/leaderboard/status` (public), `/leaderboard` (public, paginated), `/leaderboard/visibility` (GET/PATCH, JWT)
 - Notifications (JWT): `/notifications/preferences` (GET/PATCH), `/notifications/email-preferences` (GET/PATCH), `/notifications/subscribe` (POST), `/notifications/unsubscribe` (DELETE), `/notifications/apply-default` (POST)
 - Admin settings (role 3+): `/admin/settings` (GET), `/admin/settings/leaderboard` (PATCH)
