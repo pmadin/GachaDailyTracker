@@ -43,7 +43,7 @@ const profileRoutes: Router = express.Router();
  *     description: Retrieve the authenticated user's profile information
  *     responses:
  *       200:
- *         description: Profile retrieved successfully
+ *         description: Profile retrieved successfully. Includes streak_count (current) and streak_best (permanent, powers /profile streak badges).
  *       401:
  *         description: Unauthorized
  *       404:
@@ -63,7 +63,8 @@ profileRoutes.get('/profile', async (req: Request, res: Response) => {
         ) as any;
 
         const result = await database.query(
-            `SELECT id, username, email, timezone, role, created_at FROM users WHERE id = $1`,
+            `SELECT id, username, email, timezone, role, created_at, streak_count, streak_best
+             FROM users WHERE id = $1`,
             [decoded.userId]
         );
 

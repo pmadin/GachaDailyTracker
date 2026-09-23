@@ -67,6 +67,10 @@ jobs:
       - name: "Unit tests: email mask"
         run: npm run test:mask
 
+      # Pure unit tests for the streak-badge tier lookup (no database or network needed)
+      - name: "Unit tests: streak tiers"
+        run: npm run test:streak
+
       # Start the API in the background; auto-import will seed game data on startup
       - name: Start API server
         env:

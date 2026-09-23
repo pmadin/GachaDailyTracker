@@ -16,7 +16,11 @@ import {
   updateTimezone,
   fetchEmailPreferences,
   updateEmailPreferences,
+  fetchProfile,
+  type ProfileStreakInfo,
 } from '../_lib/api';
+import { STREAK_TIERS, highestEarnedTier } from '../_lib/badges';
+import PolyhedronBadge from '../_components/PolyhedronBadge';
 
 const TIMEZONE_OPTIONS = [
   // Popular
@@ -169,6 +173,16 @@ export default function ProfilePage() {
         setEmailDigestEnabled(prefs.email_digest_enabled);
         setEmailDigestHour(prefs.email_digest_hour);
       })
+      .catch(() => {});
+  }, [token]);
+
+  // Fetched fresh on every visit, not cached on the AuthUser snapshot — streak_best changes
+  // daily and AuthUser only refreshes on next login.
+  const [streakInfo, setStreakInfo] = useState<ProfileStreakInfo | null>(null);
+  useEffect(() => {
+    if (!token) return;
+    fetchProfile(token)
+      .then(({ user: u }) => setStreakInfo({ streak_count: u.streak_count, streak_best: u.streak_best }))
       .catch(() => {});
   }, [token]);
 
@@ -421,6 +435,47 @@ export default function ProfilePage() {
           <span className="rounded-full px-2.5 py-0.5 text-xs font-medium" style={{ background: 'rgba(200,155,60,0.12)', color: 'var(--gold-bright)' }}>
             {roleLabel}
           </span>
+        </div>
+      </div>
+
+      {/* Streak Badges */}
+      <div className="kintsugi-card mb-6 rounded-xl p-6" style={{ border: '1px solid rgba(200,155,60,0.12)', background: 'var(--bg2)' }}>
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-base font-semibold text-white">Streak Badges</h2>
+          {streakInfo && (
+            <span className="text-xs" style={{ color: 'var(--text2)' }}>
+              Best streak: <span className="font-medium text-white">{streakInfo.streak_best}</span> day
+              {streakInfo.streak_best === 1 ? '' : 's'}
+              {(() => {
+                const current = highestEarnedTier(streakInfo.streak_best);
+                return current ? (
+                  <>
+                    {' · '}
+                    <span style={{ color: 'var(--gold-bright)' }}>{current.label}</span>
+                  </>
+                ) : null;
+              })()}
+            </span>
+          )}
+        </div>
+        <p className="mb-4 text-xs" style={{ color: 'var(--text3)' }}>
+          Earned at your best-ever streak — kept forever, even if the streak later breaks.
+        </p>
+        <div className="grid grid-cols-3 gap-4 sm:grid-cols-6">
+          {STREAK_TIERS.map(tier => {
+            const earned = streakInfo != null && streakInfo.streak_best >= tier.days;
+            return (
+              <div key={tier.key} className="flex flex-col items-center gap-1.5">
+                <PolyhedronBadge tier={tier} locked={!earned} size={44} />
+                <span className="text-xs" style={{ color: earned ? 'var(--text)' : 'var(--text3)' }}>
+                  {tier.label}
+                </span>
+                <span className="text-[10px]" style={{ color: 'var(--text3)' }}>
+                  {tier.days}d
+                </span>
+              </div>
+            );
+          })}
         </div>
       </div>
 

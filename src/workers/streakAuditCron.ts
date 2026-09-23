@@ -9,6 +9,9 @@ import database from '../config/database';
 //        streak_last_date=May 16 → broken (missed May 17)
 async function runStreakAudit(): Promise<void> {
     try {
+        // Intentionally does NOT touch streak_best — that's the permanent best-ever value
+        // powering streak achievement badges on /profile, and must never decrease, only
+        // ratchet up (see POST /tracker/streak in tracker.ts).
         const result = await database.query(
             `UPDATE users
              SET streak_count      = 0,
