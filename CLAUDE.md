@@ -190,6 +190,9 @@ export const metadata: Metadata = {
 ```
 users             — accounts, bcrypt hash, role, timezone,
                     streak_count INTEGER DEFAULT 0, streak_last_date DATE,
+                    streak_best INTEGER DEFAULT 0 (permanent — only ever increases,
+                    powers streak achievement badges on /profile; streak_count resets
+                    on a missed day, streak_best never does),
                     leaderboard_hidden BOOLEAN DEFAULT FALSE,
                     email_digest_enabled BOOLEAN DEFAULT false,
                     email_digest_hour SMALLINT DEFAULT 8
@@ -236,6 +239,10 @@ CREATE INDEX IF NOT EXISTS idx_reset_tokens_user_id ON password_reset_tokens(use
 CREATE TABLE IF NOT EXISTS play_schedules (id SERIAL PRIMARY KEY, user_id INTEGER REFERENCES users(id) ON DELETE CASCADE, game_id INTEGER REFERENCES games(id) ON DELETE CASCADE, days_of_week SMALLINT[] NOT NULL DEFAULT '{0,1,2,3,4,5,6}', window_start TIME NOT NULL, window_end TIME NOT NULL, hook_notifications BOOLEAN NOT NULL DEFAULT false, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, UNIQUE(user_id, game_id));
 CREATE INDEX IF NOT EXISTS idx_play_schedules_user_id ON play_schedules(user_id);
 CREATE INDEX IF NOT EXISTS idx_play_schedules_game_id ON play_schedules(game_id);
+
+-- v5 streak badges:
+ALTER TABLE users ADD COLUMN IF NOT EXISTS streak_best INTEGER NOT NULL DEFAULT 0;
+UPDATE users SET streak_best = streak_count WHERE streak_best < streak_count;
 ```
 
 ---

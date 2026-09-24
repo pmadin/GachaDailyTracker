@@ -196,6 +196,18 @@ body {
   .hero-anim, .hero-panel { animation: none; }
 }
 
+/* ── Streak badge 3D spin (profile page + /dev/badges preview) ── */
+.gdt-badge-spin {
+  animation: gdt-badge-spin 8s linear infinite;
+}
+@keyframes gdt-badge-spin {
+  from { transform: rotateY(0deg); }
+  to   { transform: rotateY(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gdt-badge-spin { animation: none; }
+}
+
 /* ── Bento feature cells ── */
 .bento-cell { transition: background 0.2s, transform 0.15s; }
 .bento-cell:hover { background: var(--bg3) !important; transform: translateY(-1px); }

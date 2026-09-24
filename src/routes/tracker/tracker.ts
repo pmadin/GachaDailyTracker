@@ -86,7 +86,9 @@ trackerRouter.get('/games', async (req, res) => {
         `, [userId]);
 
         // Expire stale streak on read — catches users who return after missing days
-        // without waiting for the nightly audit cron.
+        // without waiting for the nightly audit cron. Does NOT touch streak_best — that's
+        // the permanent best-ever value powering streak achievement badges on /profile, and
+        // must never decrease, only ratchet up (see POST /tracker/streak).
         await database.query(
             `UPDATE users
              SET streak_count = 0, streak_last_date = NULL, updated_at = CURRENT_TIMESTAMP
@@ -624,7 +626,13 @@ trackerRouter.post('/streak', async (req, res) => {
             });
         }
 
-        // All games verified complete in DB — run streak increment logic
+        // All games verified complete in DB — run streak increment logic.
+        // streak_best ratchets up via GREATEST alongside streak_count in the same atomic
+        // statement — it powers the permanent streak achievement badges on /profile, and must
+        // never decrease (only the audit cron / GET /tracker/games self-heal reset
+        // streak_count, and neither of those should ever touch streak_best — see their
+        // comments). The streak_count CASE is repeated inline for the GREATEST computation
+        // since a single UPDATE can't reference a sibling SET clause's new value.
         const result = await database.query(`
             UPDATE users
             SET
@@ -636,15 +644,25 @@ trackerRouter.post('/streak', async (req, res) => {
                 streak_last_date = CASE
                     WHEN streak_last_date = CURRENT_DATE THEN streak_last_date
                     ELSE CURRENT_DATE
-                END
+                END,
+                streak_best = GREATEST(
+                    streak_best,
+                    CASE
+                        WHEN streak_last_date = CURRENT_DATE     THEN streak_count
+                        WHEN streak_last_date = CURRENT_DATE - 1 THEN streak_count + 1
+                        ELSE 1
+                    END
+                )
             WHERE id = $1
-            RETURNING streak_count
+            RETURNING streak_count, streak_best
         `, [userId]);
 
         const newStreak = result.rows[0].streak_count;
+        const newBest = result.rows[0].streak_best;
 
         res.json({
             streak: newStreak,
+            streakBest: newBest,
             allComplete: true,
             completed: completedCount,
             total: trackedCount,

@@ -164,6 +164,19 @@ export async function updateTimezone(
   });
 }
 
+// Fetched fresh on every /profile visit — not cached on AuthUser, since streak_count/
+// streak_best change daily and AuthUser is a login-time snapshot persisted to localStorage.
+export interface ProfileStreakInfo {
+  streak_count: number;
+  streak_best: number;
+}
+
+export async function fetchProfile(
+  token: string,
+): Promise<{ user: AuthUser & ProfileStreakInfo & { created_at: string } }> {
+  return apiFetch('/gdt/auth/profile', { headers: authHeader(token) });
+}
+
 export async function updateEmail(
   token: string,
   newEmail: string,

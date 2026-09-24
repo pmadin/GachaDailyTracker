@@ -28,6 +28,16 @@ A user registered with `nogid52036@dosbee.com` (dosbee.com is a known disposable
 
 Recommendation: Option B (email verification) is the most standard and airtight. Option C is a good complement regardless.
 
+### Streak badge mascot art
+V1 of the streak achievement badges (`/profile`, shipped this session — see `src/constants/streakTiers.ts`, `frontend/app/_lib/{badges,polyhedra}.ts`, `frontend/app/_components/PolyhedronBadge.tsx`) uses real, freely-spinning CSS 3D polyhedra as the badge art — tetrahedron through a great stellated dodecahedron for Diamond, complexity scaling with tier, all on-brand gold/grey/bronze, no WebGL. That ships now.
+
+A chibi anime-girl mascot per tier is the floated upgrade path beyond that: a small mascot character (matching the Kintsugi gold theme, gacha-genre-appropriate) standing beside or holding each tier's medal, in the spirit of Azur Lane's limited-event medal art. Explicitly not scoped for v1 — no settled character design exists yet, and character art has a much higher bar to get right than geometric shapes. Six copy-pasteable image-gen prompts (Iron → Diamond) were drafted alongside this feature for previewing the concept in a separate session before committing to a direction.
+
+Open questions:
+- Chibi mascot per tier, or one consistent mascot with tier-colored outfit/accessories?
+- Static illustration vs. something animated to match the existing spinning-badge treatment?
+- Does this replace the polyhedra badges outright, or sit alongside them (e.g. mascot as a bigger "profile banner" reveal, polyhedra staying as the compact badge row)?
+
 ### Hoyolab API sync
 Allow users to sync in-game daily progress automatically via the Hoyolab API (Genshin Impact, Honkai: Star Rail, Zenless Zone Zero, etc.). Most viable first target given Hoyoverse's documented API.
 

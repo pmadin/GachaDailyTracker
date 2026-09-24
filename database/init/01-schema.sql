@@ -17,6 +17,7 @@ CREATE TABLE users (
     streak_count             INTEGER NOT NULL DEFAULT 0,
     streak_last_date         DATE,
     streak_last_attempted_at TIMESTAMP,
+    streak_best              INTEGER NOT NULL DEFAULT 0,
 
     -- Push notification default offset (minutes before reset)
     notification_offset INTEGER NOT NULL DEFAULT 30,
