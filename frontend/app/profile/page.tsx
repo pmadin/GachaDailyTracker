@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, FormEvent } from 'react';
+import { useState, useEffect, useCallback, useSyncExternalStore, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '../_context/AuthContext';
 import {
@@ -94,6 +94,18 @@ function urlBase64ToUint8Array(base64String: string): ArrayBuffer {
   return arr.buffer as ArrayBuffer;
 }
 
+const noopSubscribe = () => () => {};
+const detectPushSupport = () =>
+  'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+const detectIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent);
+const STANDALONE_QUERY = '(display-mode: standalone)';
+const detectStandalone = () => window.matchMedia(STANDALONE_QUERY).matches;
+function subscribeStandalone(onChange: () => void) {
+  const mq = window.matchMedia(STANDALONE_QUERY);
+  mq.addEventListener('change', onChange);
+  return () => mq.removeEventListener('change', onChange);
+}
+
 export default function ProfilePage() {
   const router = useRouter();
   const { token, user, login, logout, isLoading } = useAuth();
@@ -105,16 +117,17 @@ export default function ProfilePage() {
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [confirming, setConfirming] = useState(false);
 
-  // Notification state
-  const [notifSupported, setNotifSupported] = useState(false);
+  // Notification state. Browser capability checks read via useSyncExternalStore: `false` on the
+  // server (matches the pre-hydration render), real values on the client, no setState-in-effect.
+  const notifSupported = useSyncExternalStore(noopSubscribe, detectPushSupport, () => false);
+  const isIOS = useSyncExternalStore(noopSubscribe, detectIOS, () => false);
+  const isStandalone = useSyncExternalStore(subscribeStandalone, detectStandalone, () => false);
   const [notifEnabled, setNotifEnabled] = useState(false);
   const [notifOffset, setNotifOffset] = useState(30);
   const [notifLoading, setNotifLoading] = useState(false);
   const [notifError, setNotifError] = useState('');
   const [applyLoading, setApplyLoading] = useState(false);
   const [applyResult, setApplyResult] = useState('');
-  const [isIOS, setIsIOS] = useState(false);
-  const [isStandalone, setIsStandalone] = useState(false);
 
   // Change password state
   const [showPwForm, setShowPwForm] = useState(false);
@@ -148,23 +161,17 @@ export default function ProfilePage() {
     if (!isLoading && !user) router.push('/login');
   }, [isLoading, user, router]);
 
-  useEffect(() => {
+  // Prefill the delete-account identifier and timezone picker whenever the signed-in user
+  // changes. Done during render against the last-seen user (React's "adjust state when a prop
+  // changes" pattern) rather than in an effect, which would render once with stale values.
+  const [prefilledFor, setPrefilledFor] = useState<typeof user>(null);
+  if (user !== prefilledFor) {
+    setPrefilledFor(user);
     if (user) {
       setIdentifier(user.username);
       if (user.timezone) setTimezone(user.timezone);
     }
-  }, [user]);
-
-  useEffect(() => {
-    setNotifSupported(
-      typeof window !== 'undefined' &&
-      'serviceWorker' in navigator &&
-      'PushManager' in window &&
-      'Notification' in window
-    );
-    setIsIOS(/iPad|iPhone|iPod/.test(navigator.userAgent));
-    setIsStandalone(window.matchMedia('(display-mode: standalone)').matches);
-  }, []);
+  }
 
   useEffect(() => {
     if (!token) return;
