@@ -1,60 +1,77 @@
 /**
- * Procedural kintsugi vein generator. Pure TS, no DOM, deterministic for a given seed + params.
+ * Procedural kintsugi background generator. Pure TS, no DOM, deterministic for a given seed + params.
  *
- * Idea: generate the dark "islands" and let the gold veins be the gaps between them. Islands
- * never touch, so every vein is simply the space between two neighbours, and its width is how far
- * apart those two islands sit.
+ * Islands are the only shapes. The output is a solid gold canvas with a handful of dark islands on
+ * top; the veins are simply the gold showing through the gaps. Each island outline is fitted with
+ * smooth curves, so both edges of every vein stay clean.
+ *
+ * The islands come from sequential cracking, the way real pottery breaks: repeatedly take the
+ * biggest island and grow a smooth crack through its middle, in both directions, until each end
+ * runs into an older crack (or the canvas edge). That gives T-junctions instead of Voronoi-style
+ * Y-junctions. The island on the straight-through side of a T keeps one smooth edge, a crack that
+ * arrives at an angle gives its neighbour a sharp acute tip, and older cracks are thicker than
+ * newer ones, which reads like a river delta.
  *
  * Pipeline:
- *  1. Island seeds scattered with a noise-driven density (mix of big and small islands), in a
- *     rotated + stretched "island space" so islands can elongate in one direction.
- *  2. Every canvas sample is domain-warped by noise before the nearest-seed lookup, which bends
- *     the straight Voronoi borders into smooth organic curves.
- *  3. Vein field F = gap - width, where gap is twice the exact distance to the border between the
- *     two nearest islands (even width, no wedges at junctions). Width varies per island pair
- *     (hashed), swells with noise, and can taper to 0 along a border for dead-end tips. Some
- *     borders are dropped entirely so islands merge, and a vein left with no continuation tapers
- *     to a point at its junction. Optional trunk cracks (long random walks) join in with min().
- *  4. Marching squares traces F = 0, then Ramer-Douglas-Peucker simplifies and Catmull-Rom turns
- *     the points into cubic Béziers. Output is one even-odd filled path: gold veins, empty islands.
+ *  1. Grow cracks one by one on a grid slightly bigger than the canvas.
+ *  2. Rasterise each crack's width into a field; sample it through a domain warp for organic bends.
+ *  3. Marching squares traces each island outline, tagged with which crack each stretch borders.
+ *  4. Outlines are cut into sides at sharp tips only (where the bordering crack changes AND the
+ *     outline really turns); each side is fitted with as few cubic Béziers as possible (Schneider).
  */
 
 export const CANVAS = { width: 1376, height: 768 } as const;
 
 export interface VeinParams {
   seed: number;
-  /** Average island spacing in px (island space). */
-  islandSize: number;
-  /** 0..1, how much island size varies across the canvas. */
-  sizeVariation: number;
-  /** >= 1, stretches islands along `angle`. */
-  anisotropy: number;
-  /** Degrees, direction islands (and so most veins) run. */
+  /** About how many islands land on the canvas (5..20). */
+  islands: number;
+  /** 0..0.9, how strongly cracks follow `angle` instead of splitting islands evenly. */
+  flow: number;
+  /** Degrees, direction cracks lean toward. */
   angle: number;
-  /** Domain-warp amplitude in px. Higher = curvier borders. */
+  /** Domain-warp amplitude in px. Higher = curvier. */
   warp: number;
-  /** Domain-warp noise scale in px. Lower = tighter wiggles. */
+  /** Domain-warp noise scale in px. Lower = tighter bends. */
   warpScale: number;
   /** Typical vein width in px. */
   veinWidth: number;
-  /** 0..1, how much widths differ between veins and along a vein. */
+  /** 0..1, how much thicker the first cracks are than the last ones. */
+  hierarchy: number;
+  /** 0..0.8, random per-crack width and slow swelling along each crack. */
   widthVariation: number;
-  /** 0..1, share of veins that taper out to a dead-end tip. */
-  deadEnds: number;
-  /** 0..1, share of borders removed entirely so neighbouring islands merge into bigger shapes. */
-  merge: number;
-  /** Number of long trunk cracks crossing the canvas. */
-  trunks: number;
-  /** Max trunk width in px. */
-  trunkWidth: number;
-  /** RDP tolerance in px. Higher = fewer points, smaller file, softer detail. */
-  smoothing: number;
+  /** Island sides shorter than this (px) are absorbed into their neighbours: fewer, cleaner tips. */
+  tipMerge: number;
+  /** Degrees the outline must turn at a corner to stay a sharp tip; gentler corners are rounded. */
+  tipAngle: number;
+  /** Curve-fit tolerance in px. Higher = fewer, longer, smoother curves. */
+  smoothness: number;
 }
 
+/** Slider ranges, also used to clamp incoming params (URL values included). */
+export const RANGES: Record<Exclude<keyof VeinParams, 'seed'>, [number, number]> = {
+  islands: [5, 20],
+  flow: [0, 0.9],
+  angle: [-90, 90],
+  warp: [0, 90],
+  warpScale: [150, 600],
+  veinWidth: [2, 20],
+  hierarchy: [0, 1],
+  widthVariation: [0, 0.8],
+  tipMerge: [10, 160],
+  tipAngle: [20, 150],
+  smoothness: [0.5, 4],
+};
+
+type P = [number, number];
+
 export interface VeinResult {
-  d: string;
-  contours: number;
-  points: number;
+  /** Island outlines only (closed Bézier loops). */
+  islandsD: string;
+  islands: number;
+  /** Sharp tip positions, for the outline preview. */
+  tips: P[];
+  curves: number;
   ms: number;
 }
 
@@ -82,11 +99,6 @@ function hash(a: number, b: number, c: number, d = 0): number {
 
 const smooth5 = (t: number) => t * t * t * (t * (t * 6 - 15) + 10);
 
-function smoothstep(e0: number, e1: number, x: number): number {
-  const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
-  return t * t * (3 - 2 * t);
-}
-
 /** 2D value noise in [-1, 1]. */
 function valueNoise(x: number, y: number, seed: number): number {
   const ix = Math.floor(x);
@@ -104,206 +116,216 @@ function valueNoise(x: number, y: number, seed: number): number {
 
 /** Two-octave fractal noise, roughly [-1, 1]. */
 function fbm(x: number, y: number, seed: number): number {
-  return valueNoise(x, y, seed) * 0.68 + valueNoise(x * 2.07 + 17.3, y * 2.07 - 9.1, seed + 101) * 0.32;
+  return valueNoise(x, y, seed) * 0.72 + valueNoise(x * 2.07 + 17.3, y * 2.07 - 9.1, seed + 101) * 0.28;
+}
+
+const clamp = (v: number, [lo, hi]: [number, number]) => Math.min(hi, Math.max(lo, Number.isFinite(v) ? v : lo));
+
+export function clampParams(p: VeinParams): VeinParams {
+  const out = { ...p, seed: Math.floor(Number.isFinite(p.seed) ? p.seed : 1) };
+  for (const k of Object.keys(RANGES) as (keyof typeof RANGES)[]) out[k] = clamp(p[k], RANGES[k]);
+  out.islands = Math.round(out.islands);
+  return out;
 }
 
 // ── generator ────────────────────────────────────────────────────────────────────────────────
 
-export function generateVeins(p: VeinParams): VeinResult {
+const RING = -1; // side id for the canvas border
+const FAR = 60; // crack field value far away from any crack (deep inside an island)
+
+export function generateVeins(input: VeinParams): VeinResult {
   const started = performance.now();
+  const p = clampParams(input);
   const W = CANVAS.width;
   const H = CANVAS.height;
-  const seed = p.seed | 0;
+  const seed = p.seed;
   const rng = mulberry32(seed);
 
-  const ang = (p.angle * Math.PI) / 180;
-  const ca = Math.cos(ang);
-  const sa = Math.sin(ang);
-  const an = Math.max(1, p.anisotropy);
-  const cs = Math.max(20, p.islandSize);
+  // ── 1. grow cracks on a grid that extends M px past every canvas edge ──
+  const M = Math.ceil(p.warp) + 24;
+  const EW = W + 2 * M;
+  const EH = H + 2 * M;
+  const occ = new Int16Array(EW * EH); // crack id + 1 along each centreline, 0 = empty
+  const inGrid = (x: number, y: number) => x >= 0 && y >= 0 && x < EW && y < EH;
+  const inCanvas = (x: number, y: number) => x >= M && y >= M && x < M + W && y < M + H;
+  const cracks: P[][] = [];
 
-  // canvas px (already warped) -> island space: rotate so `angle` is +x, then squash x.
-  const qX = (x: number, y: number) => (x * ca + y * sa) / an;
-  const qY = (x: number, y: number) => -x * sa + y * ca;
-
-  // ── 1. island seeds on a bucketed grid in island space ──
-  const margin = p.warp + cs * an * 2;
-  const corners = [
-    [-margin, -margin], [W + margin, -margin], [-margin, H + margin], [W + margin, H + margin],
-  ];
-  let minQx = Infinity, maxQx = -Infinity, minQy = Infinity, maxQy = -Infinity;
-  for (const [x, y] of corners) {
-    const qx = qX(x, y), qy = qY(x, y);
-    minQx = Math.min(minQx, qx); maxQx = Math.max(maxQx, qx);
-    minQy = Math.min(minQy, qy); maxQy = Math.max(maxQy, qy);
-  }
-  const gx0 = Math.floor(minQx / cs) - 1;
-  const gy0 = Math.floor(minQy / cs) - 1;
-  const gCols = Math.ceil(maxQx / cs) - gx0 + 2;
-  const gRows = Math.ceil(maxQy / cs) - gy0 + 2;
-
-  const sx: number[] = [];
-  const sy: number[] = [];
-  const cellStart = new Int32Array(gCols * gRows);
-  const cellCount = new Int32Array(gCols * gRows);
-  for (let r = 0; r < gRows; r++) {
-    for (let c = 0; c < gCols; c++) {
-      const cell = r * gCols + c;
-      cellStart[cell] = sx.length;
-      // density factor ~0.3..3: <1 leaves cells empty (bigger islands), >1 packs small ones
-      const f = Math.pow(2, p.sizeVariation * 1.7 * fbm((c + gx0) * 0.28, (r + gy0) * 0.28, seed + 7));
-      const k = Math.floor(f + rng());
-      for (let n = 0; n < k; n++) {
-        sx.push((c + gx0 + rng()) * cs);
-        sy.push((r + gy0 + rng()) * cs);
-      }
-      cellCount[cell] = sx.length - cellStart[cell];
+  // Grow one half of a crack from (x, y) until it hits another crack or leaves the grid.
+  const growHalf = (x0: number, y0: number, heading: number, id: number, salt: number): P[] => {
+    const pts: P[] = [];
+    let x = x0, y = y0, h = heading;
+    for (let s = 0; s < 4000; s++) {
+      // Gentle wander with a spring back to the starting direction, so cracks stay fracture-like
+      // instead of curling. The domain warp adds the larger bends later.
+      h += fbm(s / 90, id * 7.7 + salt, seed + 91) * 0.012 + (heading - h) * 0.02;
+      const nx = x + Math.cos(h) * 2;
+      const ny = y + Math.sin(h) * 2;
+      pts.push([nx, ny]);
+      if (!inGrid(nx, ny)) break;
+      const o = occ[Math.floor(ny) * EW + Math.floor(nx)];
+      if (o !== 0 && o !== id + 1) break; // ran into an older crack: T-junction
+      x = nx;
+      y = ny;
     }
-  }
-
-  // Width of the vein between islands a and b at island-space point (qx, qy).
-  const pairWidth = (a: number, b: number, qx: number, qy: number): number => {
-    const lo = a < b ? a : b;
-    const hi = a < b ? b : a;
-    if (hash(lo, hi, seed, 6) < p.merge) return 0;
-    let w = p.veinWidth * (1 - p.widthVariation * 0.8 * hash(lo, hi, seed, 2));
-    if (hash(lo, hi, seed, 3) < p.deadEnds) {
-      // position along the shared border (perpendicular to the seed-to-seed line)
-      const ex = -(sy[hi] - sy[lo]);
-      const ey = sx[hi] - sx[lo];
-      const len = Math.hypot(ex, ey) || 1;
-      const t = ((qx - (sx[lo] + sx[hi]) / 2) * ex + (qy - (sy[lo] + sy[hi]) / 2) * ey) / len;
-      const tip = (hash(lo, hi, seed, 4) - 0.5) * cs * 0.6;
-      const dir = hash(lo, hi, seed, 5) < 0.5 ? 1 : -1;
-      w *= 1 - smoothstep(-cs * 0.7, 0, dir * (t - tip));
-    }
-    return w;
+    return pts;
   };
 
-  // ── 2. trunk cracks, rasterised into their own field ──
-  const gw = W + 3; // samples from x = -1 .. W + 1
-  const gh = H + 3;
-  const trunkF = new Float32Array(gw * gh).fill(Infinity);
-  for (let k = 0; k < p.trunks; k++) {
-    const side = Math.floor(rng() * 4);
-    const along = 0.15 + rng() * 0.7;
-    const start: [number, number] =
-      side === 0 ? [along * W, -30] : side === 1 ? [W + 30, along * H] : side === 2 ? [along * W, H + 30] : [-30, along * H];
-    const back = 0.15 + rng() * 0.7;
-    const target: [number, number] =
-      side === 0 ? [back * W, H + 60] : side === 1 ? [-60, back * H] : side === 2 ? [back * W, -60] : [W + 60, back * H];
-    let [x, y] = start;
-    let heading = Math.atan2(target[1] - y, target[0] - x);
-    const pts: { x: number; y: number; w: number }[] = [];
-    for (let s = 0; s < 4000; s += 6) {
-      const w = p.trunkWidth * (0.3 + 0.7 * (0.5 + 0.5 * fbm(s / 320, k * 9.1, seed + 55)));
-      pts.push({ x, y, w });
-      if (s > 60 && (x < -50 || x > W + 50 || y < -50 || y > H + 50)) break;
-      const desired = Math.atan2(target[1] - y, target[0] - x);
-      let diff = desired - heading;
-      diff = Math.atan2(Math.sin(diff), Math.cos(diff));
-      heading += fbm(s / 240, k * 3.7, seed + 77) * 0.07 + diff * 0.025;
-      x += Math.cos(heading) * 6;
-      y += Math.sin(heading) * 6;
-    }
-    for (let i = 0; i + 1 < pts.length; i++) {
-      const a = pts[i], b = pts[i + 1];
-      const pad = Math.max(a.w, b.w) / 2 + 3;
-      const x0 = Math.max(0, Math.floor(Math.min(a.x, b.x) - pad) + 1);
-      const x1 = Math.min(gw - 1, Math.ceil(Math.max(a.x, b.x) + pad) + 1);
-      const y0 = Math.max(0, Math.floor(Math.min(a.y, b.y) - pad) + 1);
-      const y1 = Math.min(gh - 1, Math.ceil(Math.max(a.y, b.y) + pad) + 1);
-      const dx = b.x - a.x, dy = b.y - a.y;
-      const l2 = dx * dx + dy * dy || 1;
-      for (let j = y0; j <= y1; j++) {
-        const py = j - 1;
-        for (let i2 = x0; i2 <= x1; i2++) {
-          const px = i2 - 1;
-          const u = Math.min(1, Math.max(0, ((px - a.x) * dx + (py - a.y) * dy) / l2));
-          const d = Math.hypot(px - (a.x + dx * u), py - (a.y + dy * u));
-          const v = 2 * d - (a.w + (b.w - a.w) * u);
-          const idx = j * gw + i2;
-          if (v < trunkF[idx]) trunkF[idx] = v;
+  const markCrack = (pts: P[], id: number) => {
+    for (const [x, y] of pts) {
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const gx = Math.floor(x) + dx, gy = Math.floor(y) + dy;
+          if (inGrid(gx, gy) && occ[gy * EW + gx] === 0) occ[gy * EW + gx] = id + 1;
         }
       }
     }
+  };
+
+  // Flood-fill the canvas's empty regions. Returns how many real islands exist, plus the biggest
+  // one's centroid, covariance and 50 random interior points (taken straight from the fill queue,
+  // so no extra passes over the grid).
+  const label = new Int32Array(EW * EH);
+  const queue = new Int32Array(W * H);
+  const findLargest = () => {
+    label.fill(0);
+    let count = 0, bestArea = 0, islands = 0;
+    let best = { mx: 0, my: 0, cxx: 0, cyy: 0, cxy: 0, candidates: [] as P[] };
+    for (let gy = M; gy < M + H; gy++) {
+      for (let gx = M; gx < M + W; gx++) {
+        const start = gy * EW + gx;
+        if (occ[start] || label[start]) continue;
+        const lab = ++count;
+        let head = 0, tail = 0, area = 0, sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0;
+        queue[tail++] = start;
+        label[start] = lab;
+        while (head < tail) {
+          const c = queue[head++];
+          area++;
+          const cx = c % EW, cy = (c - cx) / EW;
+          sx += cx; sy += cy; sxx += cx * cx; syy += cy * cy; sxy += cx * cy;
+          if (cx > M && !occ[c - 1] && !label[c - 1]) { label[c - 1] = lab; queue[tail++] = c - 1; }
+          if (cx < M + W - 1 && !occ[c + 1] && !label[c + 1]) { label[c + 1] = lab; queue[tail++] = c + 1; }
+          if (cy > M && !occ[c - EW] && !label[c - EW]) { label[c - EW] = lab; queue[tail++] = c - EW; }
+          if (cy < M + H - 1 && !occ[c + EW] && !label[c + EW]) { label[c + EW] = lab; queue[tail++] = c + EW; }
+        }
+        if (area > 1500) islands++;
+        if (area > bestArea) {
+          bestArea = area;
+          const mx = sx / area, my = sy / area;
+          const candidates: P[] = [];
+          for (let k = 0; k < 50; k++) {
+            const c = queue[Math.floor(rng() * tail)];
+            const x = c % EW;
+            candidates.push([x, (c - x) / EW]);
+          }
+          best = { mx, my, cxx: sxx / area - mx * mx, cyy: syy / area - my * my, cxy: sxy / area - mx * my, candidates };
+        }
+      }
+    }
+    return { best, found: bestArea > 0, islands };
+  };
+
+  for (let attempt = 0; attempt < 60; attempt++) {
+    const { best, found, islands } = findLargest();
+    if (islands >= p.islands || !found) break;
+
+    // shape of the biggest island: covariance -> its long axis
+    const { mx, my, cxx, cyy, cxy, candidates } = best;
+    const major = 0.5 * Math.atan2(2 * cxy, cxx - cyy);
+
+    // start where the island is widest: the candidate with the most clearance in every direction
+    let sx = mx, sy = my, bestClear = -1;
+    for (const [x, y] of candidates) {
+      let clear = Infinity;
+      for (let k = 0; k < 16 && clear > bestClear; k++) {
+        const a = (k / 16) * Math.PI * 2;
+        let d = 0;
+        for (; d < 400; d += 3) {
+          const rx = Math.floor(x + Math.cos(a) * d), ry = Math.floor(y + Math.sin(a) * d);
+          if (!inCanvas(rx, ry) || occ[ry * EW + rx]) break;
+        }
+        clear = Math.min(clear, d);
+      }
+      if (clear > bestClear) { bestClear = clear; sx = x; sy = y; }
+    }
+
+    // split across the long axis, leaning toward the flow angle, with a little randomness
+    const minor = major + Math.PI / 2;
+    const flowAng = (p.angle * Math.PI) / 180;
+    let diff = flowAng - minor;
+    diff = Math.atan2(Math.sin(2 * diff), Math.cos(2 * diff)) / 2; // wrap to (-90°, 90°]: lines have no direction
+    const heading = minor + diff * p.flow + (rng() - 0.5) * 0.5;
+
+    const id = cracks.length;
+    const a = growHalf(sx, sy, heading, id, 0);
+    const b = growHalf(sx, sy, heading + Math.PI, id, 13);
+    const crack: P[] = [...b.reverse(), [sx, sy], ...a];
+    cracks.push(crack);
+    markCrack(crack, id);
   }
 
-  // ── 3. sample the vein field ──
-  const F = new Float32Array(gw * gh);
-  const ws = Math.max(20, p.warpScale);
-  // Short on purpose: it also sets how far a vein "bleeds" into a merged border as a tiny barb.
-  const blendR = cs * 0.035;
+  // ── 2. crack width field (older cracks thicker), sampled through a domain warp ──
+  const Fc = new Float32Array(EW * EH).fill(FAR);
+  const cid = new Int16Array(EW * EH).fill(-1);
+  const N = cracks.length;
+  cracks.forEach((pts, k) => {
+    const order = N > 1 ? k / (N - 1) : 0;
+    const base = p.veinWidth * (1 + p.hierarchy * (0.8 - 1.3 * order)) * (1 - p.widthVariation * 0.4 * rng());
+    const widthAt = (s: number) => Math.max(1.5, base * (1 + p.widthVariation * 0.45 * fbm(s / 220, k * 5.3, seed + 31)));
+    let s = 0;
+    for (let i = 0; i + 3 < pts.length; i += 3) {
+      const a = pts[i], b = pts[i + 3];
+      const wa = widthAt(s), wb = widthAt(s + 6);
+      s += 6;
+      const pad = Math.max(wa, wb) / 2 + 3;
+      const x0 = Math.max(0, Math.floor(Math.min(a[0], b[0]) - pad));
+      const x1 = Math.min(EW - 1, Math.ceil(Math.max(a[0], b[0]) + pad));
+      const y0 = Math.max(0, Math.floor(Math.min(a[1], b[1]) - pad));
+      const y1 = Math.min(EH - 1, Math.ceil(Math.max(a[1], b[1]) + pad));
+      const dx = b[0] - a[0], dy = b[1] - a[1];
+      const l2 = dx * dx + dy * dy || 1;
+      for (let gy = y0; gy <= y1; gy++) {
+        for (let gx = x0; gx <= x1; gx++) {
+          const u = Math.min(1, Math.max(0, ((gx - a[0]) * dx + (gy - a[1]) * dy) / l2));
+          const v = 2 * Math.hypot(gx - (a[0] + dx * u), gy - (a[1] + dy * u)) - (wa + (wb - wa) * u);
+          const idx = gy * EW + gx;
+          if (v < Fc[idx]) { Fc[idx] = v; cid[idx] = k; }
+        }
+      }
+    }
+  });
+
+  const gw = W + 3; // canvas samples from x = -1 .. W + 1
+  const gh = H + 3;
+  const F = new Float32Array(gw * gh); // > 0 inside an island, < 0 in a vein
+  const side = new Int16Array(gw * gh); // which crack (or the border) a sample is nearest
+  const ws = p.warpScale;
   for (let j = 0; j < gh; j++) {
     const y = j - 1;
     for (let i = 0; i < gw; i++) {
       const idx = j * gw + i;
       if (i === 0 || j === 0 || i === gw - 1 || j === gh - 1) {
-        F[idx] = 10; // outside ring counts as island, so every vein contour closes off-canvas
+        // Border ring counts as vein, so every island closes just outside the canvas edge.
+        F[idx] = -10;
+        side[idx] = RING;
         continue;
       }
       const x = i - 1;
-      const wx = x + p.warp * fbm(x / ws, y / ws, seed + 11);
-      const wy = y + p.warp * fbm(x / ws + 31.7, y / ws - 12.3, seed + 23);
-      const qx = qX(wx, wy);
-      const qy = qY(wx, wy);
-
-      const gc = Math.floor(qx / cs) - gx0;
-      const gr = Math.floor(qy / cs) - gy0;
-      let d1 = Infinity, d2 = Infinity, d3 = Infinity, i1 = -1, i2 = -1, i3 = -1;
-      // Expanding ring search: sparse areas leave cells empty, so the 3 nearest islands can be
-      // several cells away. Any seed in ring r+1 is at least r*cs away, so stop once d3 fits.
-      for (let ring = 0; ring <= 8; ring++) {
-        if (i3 >= 0 && d3 <= (ring - 1) * (ring - 1) * cs * cs) break;
-        for (let rr = gr - ring; rr <= gr + ring; rr++) {
-          if (rr < 0 || rr >= gRows) continue;
-          const edgeRow = rr === gr - ring || rr === gr + ring;
-          for (let cc = gc - ring; cc <= gc + ring; cc += edgeRow || ring === 0 ? 1 : 2 * ring) {
-            if (cc < 0 || cc >= gCols) continue;
-            const cell = rr * gCols + cc;
-            const end = cellStart[cell] + cellCount[cell];
-            for (let s = cellStart[cell]; s < end; s++) {
-              const ddx = sx[s] - qx, ddy = sy[s] - qy;
-              const dd = ddx * ddx + ddy * ddy;
-              if (dd < d1) { d3 = d2; i3 = i2; d2 = d1; i2 = i1; d1 = dd; i1 = s; }
-              else if (dd < d2) { d3 = d2; i3 = i2; d2 = dd; i2 = s; }
-              else if (dd < d3) { d3 = dd; i3 = s; }
-            }
-          }
-        }
+      const ex = x + p.warp * fbm(x / ws, y / ws, seed + 11) + M;
+      const ey = y + p.warp * fbm(x / ws + 31.7, y / ws - 12.3, seed + 23) + M;
+      const fx = Math.floor(ex), fy = Math.floor(ey);
+      let v = FAR;
+      if (fx >= 0 && fy >= 0 && fx + 1 < EW && fy + 1 < EH) {
+        const tx = ex - fx, ty = ey - fy;
+        const o = fy * EW + fx;
+        v = (Fc[o] * (1 - tx) + Fc[o + 1] * tx) * (1 - ty) + (Fc[o + EW] * (1 - tx) + Fc[o + EW + 1] * tx) * ty;
+        side[idx] = cid[Math.round(ey) * EW + Math.round(ex)];
       }
-      let v = 10;
-      if (i2 >= 0) {
-        // Exact distance to the border between islands 1 and 2, times 2 (full vein width).
-        // Plain d2 - d1 bulges into wedges where three islands meet, this stays even.
-        const sep = Math.hypot(sx[i2] - sx[i1], sy[i2] - sy[i1]) || 1;
-        const gap = (d2 - d1) / sep;
-        d2 = Math.sqrt(d2);
-        let w = pairWidth(i1, i2, qx, qy);
-        if (i3 >= 0) {
-          d3 = Math.sqrt(d3);
-          let w13 = pairWidth(i1, i3, qx, qy);
-          const w23 = pairWidth(i2, i3, qx, qy);
-          // If only one of the junction's three borders survives, that vein dead-ends here:
-          // taper it to a point on approach instead of stopping bluntly. Scaling both w and w13
-          // keeps the two sides of the d2 = d3 line in agreement, so no flat cuts.
-          if ((w > 0 ? 1 : 0) + (w13 > 0 ? 1 : 0) + (w23 > 0 ? 1 : 0) === 1) {
-            const s = smoothstep(0, cs * 0.6, d3 - d2);
-            w *= s;
-            w13 *= s;
-          }
-          // blend toward the (1,3) pair near junctions so widths never jump
-          w = w13 + (w - w13) * (0.5 + 0.5 * smoothstep(0, blendR, d3 - d2));
-        }
-        w *= Math.max(0.15, 1 + p.widthVariation * 0.6 * fbm(x / 200, y / 200, seed + 31));
-        v = gap - w;
-      }
-      v = Math.min(v, trunkF[idx]);
       F[idx] = v === 0 ? 1e-6 : v;
     }
   }
 
-  // ── 4. marching squares -> closed loops ──
+  // ── 4. marching squares -> one closed outline per island ──
   // Edge ids: horizontal edge from sample (i,j) to (i+1,j) = 2*(j*gw+i); vertical (i,j)->(i,j+1) = +1.
   const adj = new Map<number, number[]>();
   const link = (e1: number, e2: number) => {
@@ -314,13 +336,13 @@ export function generateVeins(p: VeinParams): VeinResult {
     for (let i = 0; i < gw - 1; i++) {
       const tl = F[j * gw + i], tr = F[j * gw + i + 1];
       const bl = F[(j + 1) * gw + i], br = F[(j + 1) * gw + i + 1];
-      const c = (tl < 0 ? 8 : 0) | (tr < 0 ? 4 : 0) | (br < 0 ? 2 : 0) | (bl < 0 ? 1 : 0);
+      const c = (tl > 0 ? 8 : 0) | (tr > 0 ? 4 : 0) | (br > 0 ? 2 : 0) | (bl > 0 ? 1 : 0);
       if (c === 0 || c === 15) continue;
       const T = 2 * (j * gw + i);
       const L = T + 1;
       const B = 2 * ((j + 1) * gw + i);
       const R = 2 * (j * gw + i + 1) + 1;
-      const centerIn = tl + tr + bl + br < 0;
+      const centerIn = tl + tr + bl + br > 0;
       switch (c) {
         case 1: case 14: link(L, B); break;
         case 2: case 13: link(B, R); break;
@@ -334,121 +356,341 @@ export function generateVeins(p: VeinParams): VeinResult {
     }
   }
 
-  const edgePoint = (e: number): [number, number] => {
-    const cell = e >> 1;
-    const i = cell % gw;
-    const j = (cell - i) / gw;
-    const fa = F[cell];
-    const fb = e & 1 ? F[cell + gw] : F[cell + 1];
-    const t = fa / (fa - fb);
-    return e & 1 ? [i - 1, j - 1 + t] : [i - 1 + t, j - 1];
+  // A crossing point, plus the id of whatever this stretch of island edge borders.
+  const edgePoint = (e: number): { p: P; id: number } => {
+    const a = e >> 1;
+    const b = e & 1 ? a + gw : a + 1;
+    const t = F[a] / (F[a] - F[b]);
+    const i = a % gw, j = (a - i) / gw;
+    const island = F[a] > 0 ? a : b;
+    const vein = island === a ? b : a;
+    const id = side[vein] === RING ? RING : side[island];
+    return { p: e & 1 ? [i - 1, j - 1 + t] : [i - 1 + t, j - 1], id };
   };
 
   const visited = new Set<number>();
-  const loops: [number, number][][] = [];
+  const outlines: { pts: P[]; ids: number[] }[] = [];
   for (const startEdge of adj.keys()) {
     if (visited.has(startEdge)) continue;
-    const loop: [number, number][] = [];
+    const pts: P[] = [];
+    const ids: number[] = [];
     let prev = -1;
     let cur = startEdge;
     for (let guard = 0; guard < 1_000_000; guard++) {
       visited.add(cur);
-      loop.push(edgePoint(cur));
+      const { p: pt, id } = edgePoint(cur);
+      pts.push(pt);
+      ids.push(id);
       const n = adj.get(cur)!;
       const next = n[0] !== prev ? n[0] : n[1];
       if (next === undefined || next === startEdge) break;
       prev = cur;
       cur = next;
     }
-    if (loop.length >= 4) loops.push(loop);
+    if (pts.length >= 8 && Math.abs(polygonArea(pts)) > 400) outlines.push({ pts, ids });
   }
 
-  // ── 5. simplify + smooth into Bézier path data ──
+  // ── 5. split each outline into sides, fit each side with smooth Béziers ──
   const fmt = (n: number) => {
     const s = n.toFixed(1);
     return s.endsWith('.0') ? s.slice(0, -2) : s === '-0' ? '0' : s;
   };
-  let d = '';
-  let contours = 0;
-  let points = 0;
-  for (const loop of loops) {
-    if (Math.abs(polygonArea(loop)) < 6) continue; // specks
-    const pts = simplifyClosed(loop, Math.max(0.05, p.smoothing));
-    if (pts.length < 3) continue;
-    contours++;
-    points += pts.length;
-    const n = pts.length;
-    d += `M${fmt(pts[0][0])} ${fmt(pts[0][1])}`;
-    for (let k = 0; k < n; k++) {
-      const p0 = pts[(k - 1 + n) % n], p1 = pts[k], p2 = pts[(k + 1) % n], p3 = pts[(k + 2) % n];
-      const c1x = p1[0] + (p2[0] - p0[0]) / 6, c1y = p1[1] + (p2[1] - p0[1]) / 6;
-      const c2x = p2[0] - (p3[0] - p1[0]) / 6, c2y = p2[1] - (p3[1] - p1[1]) / 6;
-      d += `C${fmt(c1x)} ${fmt(c1y)} ${fmt(c2x)} ${fmt(c2y)} ${fmt(p2[0])} ${fmt(p2[1])}`;
+  let islandsD = '';
+  let curves = 0;
+  const tips: P[] = [];
+  // Rounding radius (in outline points, ~1 px each) for everywhere that isn't a sharp tip.
+  const round = Math.round(3 + p.smoothness * 3);
+  for (const { pts, ids } of outlines) {
+    const { sides, sharp } = splitSides(pts, ids, p.tipMerge, p.tipAngle, round);
+    let d = '';
+    for (const s of sides) {
+      const beziers = fitCurve(s.pts, p.smoothness, s.t1, s.t2);
+      for (const [p0, c1, c2, p3] of beziers) {
+        if (!d) d = `M${fmt(p0[0])} ${fmt(p0[1])}`;
+        d += `C${fmt(c1[0])} ${fmt(c1[1])} ${fmt(c2[0])} ${fmt(c2[1])} ${fmt(p3[0])} ${fmt(p3[1])}`;
+        curves++;
+      }
+      if (sharp) tips.push(s.pts[0]);
     }
-    d += 'Z';
+    if (d) islandsD += `${d}Z`;
   }
 
-  return { d, contours, points, ms: Math.round(performance.now() - started) };
+  return { islandsD, islands: outlines.length, tips, curves, ms: Math.round(performance.now() - started) };
 }
 
-function polygonArea(pts: [number, number][]): number {
+interface Side { pts: P[]; t1?: P; t2?: P }
+
+/**
+ * Cuts a closed outline into sides at its sharp tips. Candidate tips are where the bordering
+ * neighbour changes (a vein junction). A candidate survives only if the side on each end is at
+ * least `minLen` px and the outline really turns there by `minTurn` degrees or more: in a junction
+ * only the island in the narrow wedge gets a sharp tip, the others keep a smooth rounded side.
+ *
+ * Each side is smoothed with its tip end points pinned, and runs from its tip to the next tip
+ * (inclusive). An island with no sharp tips comes back as two halves joined with shared tangents,
+ * which fits as one smooth closed curve.
+ */
+function splitSides(pts: P[], ids: number[], minLen: number, minTurn: number, round: number): { sides: Side[]; sharp: boolean } {
+  const n = pts.length;
+  const segLen = (a: number, b: number) => Math.hypot(pts[b][0] - pts[a][0], pts[b][1] - pts[a][1]);
+
+  // cyclic runs of equal id: [start index, length]
+  let runs: { start: number; len: number; id: number }[] = [];
+  let first = 0;
+  while (first < n && ids[first] === ids[(first - 1 + n) % n]) first++;
+  if (first === n) {
+    runs = [{ start: 0, len: n, id: ids[0] }];
+  } else {
+    let s = first;
+    for (let k = 1; k <= n; k++) {
+      const idx = (first + k) % n;
+      if (k === n || ids[idx] !== ids[s]) {
+        runs.push({ start: s, len: (idx - s + n) % n || n, id: ids[s] });
+        s = idx;
+      }
+    }
+  }
+  const arc = (r: { start: number; len: number }) => {
+    let l = 0;
+    for (let k = 0; k < r.len; k++) l += segLen((r.start + k) % n, (r.start + k + 1) % n);
+    return l;
+  };
+
+  // absorb short sides, shortest first, while more than 2 remain
+  while (runs.length > 2) {
+    let shortest = -1, shortLen = Infinity;
+    runs.forEach((r, k) => { const l = arc(r); if (l < shortLen) { shortLen = l; shortest = k; } });
+    if (shortLen >= minLen) break;
+    // Split the short side between its two neighbours so the surviving tip lands in its middle.
+    const r = runs[shortest];
+    const half = Math.floor(r.len / 2);
+    const prev = runs[(shortest - 1 + runs.length) % runs.length];
+    const next = runs[(shortest + 1) % runs.length];
+    prev.len += half;
+    next.start = (r.start + half) % n;
+    next.len += r.len - half;
+    runs.splice(shortest, 1);
+  }
+
+  // Keep only tips where the outline genuinely turns (measured ~12 px either side of the corner).
+  const turnAt = (i: number) => {
+    const k = 12;
+    const a = pts[(i - k + n) % n], b = pts[i], c = pts[(i + k) % n];
+    const v1 = unit(sub(b, a)), v2 = unit(sub(c, b));
+    return (Math.acos(Math.max(-1, Math.min(1, dot(v1, v2)))) * 180) / Math.PI;
+  };
+  if (runs.length > 1) {
+    const kept = runs.filter(r => turnAt(r.start) >= minTurn);
+    // Dropping a tip joins its two sides: each kept run now extends to the next kept tip.
+    runs = kept.map((r, k) => {
+      const next = kept[(k + 1) % kept.length];
+      return { ...r, len: kept.length === 1 ? n : (next.start - r.start + n) % n };
+    });
+  }
+
+  if (runs.length <= 1) {
+    // No sharp tips: smooth the whole closed outline, then split at its two farthest points with
+    // matching tangents so the fit is one seamless curve.
+    const sm = smoothClosed(pts, round);
+    let a = 0, b = 0, best = -1;
+    for (let i = 0; i < n; i += 4) {
+      for (let j = i + 4; j < n; j += 4) {
+        const dd = (sm[i][0] - sm[j][0]) ** 2 + (sm[i][1] - sm[j][1]) ** 2;
+        if (dd > best) { best = dd; a = i; b = j; }
+      }
+    }
+    const tangent = (i: number) => unit(sub(sm[(i + 4) % n], sm[(i - 4 + n) % n]));
+    const ta = tangent(a), tb = tangent(b);
+    const half = (from: number, len: number): P[] => Array.from({ length: len + 1 }, (_, k) => sm[(from + k) % n]);
+    return {
+      sharp: false,
+      sides: [
+        { pts: half(a, b - a), t1: ta, t2: mul(tb, -1) },
+        { pts: half(b, n - (b - a)), t1: tb, t2: mul(ta, -1) },
+      ],
+    };
+  }
+
+  return {
+    sharp: true,
+    sides: runs.map(r => {
+      const out: P[] = [];
+      for (let k = 0; k <= r.len; k++) out.push(pts[(r.start + k) % n]);
+      return { pts: smoothOpen(out, round) };
+    }),
+  };
+}
+
+/** Moving-average smoothing (3 box passes, ~Gaussian) with both end points pinned: they are tips. */
+function smoothOpen(pts: P[], radius: number): P[] {
+  let cur = pts;
+  for (let pass = 0; pass < 3; pass++) {
+    const next: P[] = [];
+    for (let i = 0; i < cur.length; i++) {
+      // shrink the window near the pinned ends so tips stay exactly in place
+      const r = Math.min(radius, i, cur.length - 1 - i);
+      let x = 0, y = 0;
+      for (let k = -r; k <= r; k++) { x += cur[i + k][0]; y += cur[i + k][1]; }
+      next.push([x / (2 * r + 1), y / (2 * r + 1)]);
+    }
+    cur = next;
+  }
+  return cur;
+}
+
+/** Same smoothing on a closed loop (no pinned points). */
+function smoothClosed(pts: P[], radius: number): P[] {
+  const n = pts.length;
+  let cur = pts;
+  for (let pass = 0; pass < 3; pass++) {
+    const next: P[] = [];
+    for (let i = 0; i < n; i++) {
+      let x = 0, y = 0;
+      for (let k = -radius; k <= radius; k++) { const q = cur[(i + k + n) % n]; x += q[0]; y += q[1]; }
+      next.push([x / (2 * radius + 1), y / (2 * radius + 1)]);
+    }
+    cur = next;
+  }
+  return cur;
+}
+
+function polygonArea(pts: P[]): number {
   let a = 0;
   for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) a += (pts[j][0] + pts[i][0]) * (pts[j][1] - pts[i][1]);
   return a / 2;
 }
 
-/** Ramer-Douglas-Peucker for a closed loop: split at the point farthest from pts[0]. */
-function simplifyClosed(pts: [number, number][], eps: number): [number, number][] {
-  let far = 0, best = -1;
-  for (let i = 1; i < pts.length; i++) {
-    const dd = (pts[i][0] - pts[0][0]) ** 2 + (pts[i][1] - pts[0][1]) ** 2;
-    if (dd > best) { best = dd; far = i; }
+// ── Schneider curve fitting ("An Algorithm for Automatically Fitting Digitized Curves") ──────
+
+type Bez = [P, P, P, P];
+const sub = (a: P, b: P): P => [a[0] - b[0], a[1] - b[1]];
+const add = (a: P, b: P): P => [a[0] + b[0], a[1] + b[1]];
+const mul = (a: P, s: number): P => [a[0] * s, a[1] * s];
+const dot = (a: P, b: P) => a[0] * b[0] + a[1] * b[1];
+const dist = (a: P, b: P) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+const unit = (a: P): P => { const l = Math.hypot(a[0], a[1]) || 1; return [a[0] / l, a[1] / l]; };
+
+function bezAt(b: Bez, t: number): P {
+  const mt = 1 - t;
+  const b0 = mt * mt * mt, b1 = 3 * t * mt * mt, b2 = 3 * t * t * mt, b3 = t * t * t;
+  return [b[0][0] * b0 + b[1][0] * b1 + b[2][0] * b2 + b[3][0] * b3, b[0][1] * b0 + b[1][1] * b1 + b[2][1] * b2 + b[3][1] * b3];
+}
+
+function fitCurve(pts: P[], error: number, startTangent?: P, endTangent?: P): Bez[] {
+  const n = pts.length;
+  if (n < 2) return [];
+  const out: Bez[] = [];
+  const t1 = startTangent ?? unit(sub(pts[Math.min(4, n - 1)], pts[0]));
+  const t2 = endTangent ?? unit(sub(pts[Math.max(n - 5, 0)], pts[n - 1]));
+  fitCubic(pts, 0, n - 1, t1, t2, error * error, out, 0);
+  return out;
+}
+
+function fitCubic(d: P[], first: number, last: number, t1: P, t2: P, err2: number, out: Bez[], depth: number): void {
+  const nPts = last - first + 1;
+  if (nPts <= 3) {
+    const l = dist(d[first], d[last]) / 3;
+    out.push([d[first], add(d[first], mul(t1, l)), add(d[last], mul(t2, l)), d[last]]);
+    return;
   }
-  const a = rdp(pts.slice(0, far + 1), eps);
-  const b = rdp([...pts.slice(far), pts[0]], eps);
-  return [...a.slice(0, -1), ...b.slice(0, -1)];
-}
-
-function rdp(pts: [number, number][], eps: number): [number, number][] {
-  if (pts.length < 3) return pts;
-  const keep = new Uint8Array(pts.length);
-  keep[0] = keep[pts.length - 1] = 1;
-  const stack: [number, number][] = [[0, pts.length - 1]];
-  while (stack.length) {
-    const [s, e] = stack.pop()!;
-    const [ax, ay] = pts[s], [bx, by] = pts[e];
-    const dx = bx - ax, dy = by - ay;
-    const len = Math.hypot(dx, dy) || 1;
-    let maxD = -1, idx = -1;
-    for (let i = s + 1; i < e; i++) {
-      const dist = Math.abs((pts[i][0] - ax) * dy - (pts[i][1] - ay) * dx) / len;
-      if (dist > maxD) { maxD = dist; idx = i; }
-    }
-    if (maxD > eps && idx > 0) {
-      keep[idx] = 1;
-      stack.push([s, idx], [idx, e]);
+  let u = chordLength(d, first, last);
+  let bez = generateBezier(d, first, last, u, t1, t2);
+  let [maxErr, split] = maxError(d, first, last, bez, u);
+  if (maxErr < err2) { out.push(bez); return; }
+  if (maxErr < err2 * 16) {
+    for (let k = 0; k < 6; k++) {
+      u = reparameterize(d, first, u, bez);
+      bez = generateBezier(d, first, last, u, t1, t2);
+      [maxErr, split] = maxError(d, first, last, bez, u);
+      if (maxErr < err2) { out.push(bez); return; }
     }
   }
-  return pts.filter((_, i) => keep[i]);
+  if (depth > 8) { out.push(bez); return; }
+  const tc = unit(sub(d[split - 1], d[split + 1]));
+  fitCubic(d, first, split, t1, tc, err2, out, depth + 1);
+  fitCubic(d, split, last, mul(tc, -1), t2, err2, out, depth + 1);
 }
 
-/** Standalone SVG: gold veins, transparent islands. Drop-in for the /public vein files. */
-export function veinSvg(d: string, color: string): string {
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${CANVAS.width} ${CANVAS.height}"><path fill="${color}" fill-rule="evenodd" d="${d}"/></svg>`;
+function chordLength(d: P[], first: number, last: number): number[] {
+  const u = [0];
+  for (let i = first + 1; i <= last; i++) u.push(u[u.length - 1] + dist(d[i], d[i - 1]));
+  const total = u[u.length - 1] || 1;
+  return u.map(v => v / total);
 }
 
-/** Two-tone version (black islands on gold), handy for editing in Illustrator. */
-export function twoToneSvg(d: string, color: string): string {
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${CANVAS.width} ${CANVAS.height}"><rect width="${CANVAS.width}" height="${CANVAS.height}" fill="#080808"/><path fill="${color}" fill-rule="evenodd" d="${d}"/></svg>`;
+function generateBezier(d: P[], first: number, last: number, u: number[], t1: P, t2: P): Bez {
+  const p0 = d[first], p3 = d[last];
+  let c00 = 0, c01 = 0, c11 = 0, x0 = 0, x1 = 0;
+  for (let i = 0; i < u.length; i++) {
+    const t = u[i], mt = 1 - t;
+    const b0 = mt * mt * mt, b1 = 3 * t * mt * mt, b2 = 3 * t * t * mt, b3 = t * t * t;
+    const a1 = mul(t1, b1), a2 = mul(t2, b2);
+    c00 += dot(a1, a1); c01 += dot(a1, a2); c11 += dot(a2, a2);
+    const tmp = sub(d[first + i], add(mul(p0, b0 + b1), mul(p3, b2 + b3)));
+    x0 += dot(a1, tmp); x1 += dot(a2, tmp);
+  }
+  const det = c00 * c11 - c01 * c01;
+  const seg = dist(p0, p3);
+  let al1 = det ? (x0 * c11 - x1 * c01) / det : 0;
+  let al2 = det ? (c00 * x1 - c01 * x0) / det : 0;
+  // Degenerate or wildly overshooting fits fall back to the classic 1/3 heuristic.
+  if (al1 < seg * 1e-3 || al2 < seg * 1e-3 || al1 > seg * 1.2 || al2 > seg * 1.2) al1 = al2 = seg / 3;
+  return [p0, add(p0, mul(t1, al1)), add(p3, mul(t2, al2)), p3];
 }
 
-export const PRESETS: Record<'network' | 'trunks', Omit<VeinParams, 'seed'>> = {
-  network: {
-    islandSize: 80, sizeVariation: 0.7, anisotropy: 2.4, angle: 8, warp: 70, warpScale: 200,
-    veinWidth: 8, widthVariation: 0.65, deadEnds: 0.25, merge: 0.25, trunks: 0, trunkWidth: 18, smoothing: 0.6,
+function maxError(d: P[], first: number, last: number, bez: Bez, u: number[]): [number, number] {
+  let max = 0, split = Math.floor((first + last) / 2);
+  for (let i = first + 1; i < last; i++) {
+    const q = bezAt(bez, u[i - first]);
+    const e = (q[0] - d[i][0]) ** 2 + (q[1] - d[i][1]) ** 2;
+    if (e >= max) { max = e; split = i; }
+  }
+  return [max, Math.min(last - 1, Math.max(first + 1, split))];
+}
+
+function reparameterize(d: P[], first: number, u: number[], b: Bez): number[] {
+  return u.map((t, i) => {
+    const pt = d[first + i];
+    const q = bezAt(b, t);
+    const mt = 1 - t;
+    const q1: P = [
+      3 * (mt * mt * (b[1][0] - b[0][0]) + 2 * mt * t * (b[2][0] - b[1][0]) + t * t * (b[3][0] - b[2][0])),
+      3 * (mt * mt * (b[1][1] - b[0][1]) + 2 * mt * t * (b[2][1] - b[1][1]) + t * t * (b[3][1] - b[2][1])),
+    ];
+    const q2: P = [
+      6 * (mt * (b[2][0] - 2 * b[1][0] + b[0][0]) + t * (b[3][0] - 2 * b[2][0] + b[1][0])),
+      6 * (mt * (b[2][1] - 2 * b[1][1] + b[0][1]) + t * (b[3][1] - 2 * b[2][1] + b[1][1])),
+    ];
+    const diff = sub(q, pt);
+    const den = dot(q1, q1) + dot(diff, q2);
+    const next = den ? t - dot(diff, q1) / den : t;
+    return Math.min(1, Math.max(0, next));
+  });
+}
+
+// ── SVG output ───────────────────────────────────────────────────────────────────────────────
+
+const RECT = `M0 0H${CANVAS.width}V${CANVAS.height}H0Z`;
+
+/** Gold veins with transparent islands (islands cut out of a gold rect). Drop-in for /public files. */
+export function veinSvg(islandsD: string, color: string): string {
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${CANVAS.width} ${CANVAS.height}"><path fill="${color}" fill-rule="evenodd" d="${RECT}${islandsD}"/></svg>`;
+}
+
+/** Gold canvas with dark island shapes on top, handy for editing the islands in Illustrator. */
+export function twoToneSvg(islandsD: string, color: string): string {
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${CANVAS.width} ${CANVAS.height}"><rect width="${CANVAS.width}" height="${CANVAS.height}" fill="${color}"/><path fill="#080808" d="${islandsD}"/></svg>`;
+}
+
+export const PRESETS: Record<'delta' | 'trunks', Omit<VeinParams, 'seed'>> = {
+  // toward the homepage background: many flowing, mostly-horizontal veins
+  delta: {
+    islands: 16, flow: 0.6, angle: 8, warp: 45, warpScale: 280,
+    veinWidth: 8, hierarchy: 0.5, widthVariation: 0.4, tipMerge: 40, tipAngle: 55, smoothness: 1.5,
   },
+  // toward the login background: a few thick early cracks, thinner branches off them
   trunks: {
-    islandSize: 105, sizeVariation: 0.8, anisotropy: 1.6, angle: -30, warp: 75, warpScale: 220,
-    veinWidth: 7, widthVariation: 0.7, deadEnds: 0.35, merge: 0.22, trunks: 2, trunkWidth: 36, smoothing: 0.6,
+    islands: 11, flow: 0.35, angle: -35, warp: 40, warpScale: 300,
+    veinWidth: 9, hierarchy: 0.9, widthVariation: 0.4, tipMerge: 40, tipAngle: 55, smoothness: 1.5,
   },
 };

@@ -52,10 +52,14 @@ Open questions:
 `frontend/app/not-found.tsx` shipped as a simple on-brand page: gold "404" with a kintsugi crack, vein background, "This banner has already ended." copy, Home / Browse games buttons. Planned upgrade: a dazed chibi anime-girl face with swirly spiral (@_@) eyes above/beside the 404. Same art direction as the streak badge mascot idea above, so ideally the same character. Keep it a static SVG/PNG (no JS) so the 404 stays a zero-JS Server Component. Maybe a slow spin on the swirl eyes via CSS only.
 
 ### Kintsugi background generator
-Experimental admin page at `/admin/kintsugi` (`frontend/app/admin/kintsugi/`). Generates vein SVGs procedurally instead of tracing Gemini images in Illustrator: it builds dark "islands" (warped Voronoi cells) and the gold veins are the gaps between them. Seeded and URL-driven, with Network and Trunks presets, in-situ previews (login, homepage hero, card hover) and SVG / two-tone export.
+Experimental admin page at `/admin/kintsugi` (`frontend/app/admin/kintsugi/`). Generates backgrounds procedurally instead of tracing Gemini images in Illustrator. Islands are the only shapes: a solid gold canvas with dark islands on top, and the veins are the gold showing through.
+
+The islands come from sequential cracking, the way real pottery breaks. The generator repeatedly grows a smooth crack through the biggest island until both ends hit older cracks, which gives T-junctions (smooth through-sides, sharp acute tips) and older-thicker/newer-thinner veins. Each island outline is then fitted with long Bézier curves, keeping tips only where the outline really turns sharply. An earlier Voronoi version gave symmetric Y-junctions, which read as turtle shell or onion cells, so it was dropped.
+
+Seeded and URL-driven, with Delta and Trunks presets, island-outline and in-situ previews (login, homepage hero, card hover) and SVG / two-tone export.
 
 Follow-ups:
-- **Vein hierarchy.** The references read like a river delta, thick veins splitting into thinner ones. The generator currently gives a mesh with random per-vein widths. Idea: scale width by distance from the trunks (or a low-frequency "flow" field) so veins thin out as they branch away.
+- Generation takes ~1 s. Fine for a tool, but a Web Worker would keep slider drags smooth.
 - **Broken card hover.** `.kintsugi-card::before` in `globals.css` points at `/kintsugi-veins.svg`, which doesn't exist, so the hover vein effect never shows and every page with a kintsugi card makes a 404 request. Generate one with the tool, save it as `frontend/public/kintsugi-veins.svg`, and check the hover.
 - Once a few generated backgrounds look right, give each auth page its own instead of rotating the same login SVG.
 

@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   CANVAS,
   PRESETS,
+  RANGES,
+  clampParams,
   generateVeins,
   twoToneSvg,
   veinSvg,
@@ -11,29 +13,28 @@ import {
 } from './veinGenerator';
 
 /**
- * Admin-only kintsugi background generator (experimental). Generates vein SVGs in the style of
- * /public/kintsugi-veins-*.svg, previews them the way the site actually uses them, and exports
- * them. Nothing here writes to /public, pick a result and save it by hand.
+ * Admin-only kintsugi background generator (experimental). The islands are the only shapes: a
+ * solid gold canvas with dark islands on top, and the veins are the gold showing through. Exports
+ * in the style of /public/kintsugi-veins-*.svg and previews them the way the site uses them.
+ * Nothing here writes to /public, pick a result and save it by hand.
  *
  * All settings live in the URL query, so a result can be shared or regenerated exactly.
  */
 
 type NumKey = Exclude<keyof VeinParams, 'seed'>;
 
-const SLIDERS: { key: NumKey; label: string; min: number; max: number; step: number; hint: string }[] = [
-  { key: 'islandSize', label: 'Island size', min: 40, max: 260, step: 5, hint: 'Average spacing between islands' },
-  { key: 'sizeVariation', label: 'Size variation', min: 0, max: 1, step: 0.05, hint: 'Mix of big and small islands' },
-  { key: 'anisotropy', label: 'Stretch', min: 1, max: 3.5, step: 0.1, hint: 'Elongates islands along the angle' },
-  { key: 'angle', label: 'Angle', min: -90, max: 90, step: 1, hint: 'Direction the veins mostly flow' },
-  { key: 'warp', label: 'Curviness', min: 0, max: 120, step: 1, hint: 'Domain warp amplitude (px)' },
-  { key: 'warpScale', label: 'Wiggle scale', min: 80, max: 600, step: 10, hint: 'Lower = tighter wiggles' },
-  { key: 'veinWidth', label: 'Vein width', min: 0.5, max: 20, step: 0.1, hint: 'Typical gap between islands (px)' },
-  { key: 'widthVariation', label: 'Width variation', min: 0, max: 1, step: 0.05, hint: 'Thick vs hairline veins, swelling' },
-  { key: 'deadEnds', label: 'Dead ends', min: 0, max: 1, step: 0.05, hint: 'Share of veins that taper to a tip' },
-  { key: 'merge', label: 'Merge islands', min: 0, max: 0.9, step: 0.05, hint: 'Remove borders so islands join into bigger shapes' },
-  { key: 'trunks', label: 'Trunk cracks', min: 0, max: 5, step: 1, hint: 'Long thick cracks across the canvas' },
-  { key: 'trunkWidth', label: 'Trunk width', min: 4, max: 70, step: 1, hint: 'Max trunk width (px)' },
-  { key: 'smoothing', label: 'Simplify', min: 0.1, max: 2, step: 0.05, hint: 'Higher = smaller file, softer detail' },
+const SLIDERS: { key: NumKey; label: string; step: number; hint: string }[] = [
+  { key: 'islands', label: 'Islands', step: 1, hint: 'About how many islands land on the canvas' },
+  { key: 'flow', label: 'Flow', step: 0.05, hint: '0 = split islands evenly, higher = cracks follow the angle (longer islands)' },
+  { key: 'angle', label: 'Angle', step: 1, hint: 'Direction the cracks lean toward' },
+  { key: 'warp', label: 'Curviness', step: 1, hint: 'How far the cracks bend (px)' },
+  { key: 'warpScale', label: 'Bend scale', step: 10, hint: 'Lower = tighter bends, higher = long sweeping curves' },
+  { key: 'veinWidth', label: 'Vein width', step: 0.5, hint: 'Typical gap between islands (px)' },
+  { key: 'hierarchy', label: 'Hierarchy', step: 0.05, hint: 'How much thicker the first cracks are than later branches' },
+  { key: 'widthVariation', label: 'Width variation', step: 0.05, hint: 'Random per-crack width and slow swelling' },
+  { key: 'tipMerge', label: 'Tip merge', step: 5, hint: 'Island sides shorter than this are absorbed: fewer, cleaner tips' },
+  { key: 'tipAngle', label: 'Tip angle', step: 5, hint: 'How sharply a corner must turn to stay a pointed tip; gentler corners get rounded' },
+  { key: 'smoothness', label: 'Smoothness', step: 0.1, hint: 'Curve-fit tolerance: higher = fewer, longer curves' },
 ];
 
 const COLORS = [
@@ -42,10 +43,10 @@ const COLORS = [
   { value: '#e8c86a', label: 'Gold bright' },
 ];
 
-type Preview = 'raw' | 'twotone' | 'login' | 'homepage' | 'card' | 'compare';
+type Preview = 'raw' | 'outline' | 'login' | 'homepage' | 'card' | 'compare';
 const PREVIEWS: { key: Preview; label: string }[] = [
   { key: 'raw', label: 'Raw' },
-  { key: 'twotone', label: 'Two-tone' },
+  { key: 'outline', label: 'Island outlines' },
   { key: 'login', label: 'Login page' },
   { key: 'homepage', label: 'Homepage hero' },
   { key: 'card', label: 'Card hover' },
@@ -58,7 +59,7 @@ const HERO_MASK = 'radial-gradient(ellipse 85% 75% at 50% 30%, black 10%, transp
 
 interface Settings extends VeinParams { color: string }
 
-const DEFAULTS: Settings = { seed: 1, ...PRESETS.network, color: '#c8913c' };
+const DEFAULTS: Settings = { seed: 1, ...PRESETS.delta, color: '#c8913c' };
 
 function readUrl(): Settings {
   if (typeof window === 'undefined') return DEFAULTS;
@@ -70,7 +71,7 @@ function readUrl(): Settings {
   }
   const color = q.get('color');
   if (color && /^#[0-9a-f]{6}$/i.test(color)) out.color = color;
-  return out;
+  return { ...clampParams(out), color: out.color };
 }
 
 const randomSeed = () => Math.floor(Math.random() * 1_000_000);
@@ -103,8 +104,8 @@ export default function KintsugiGeneratorPage() {
   }, [committed]);
 
   const result = useMemo(() => generateVeins(committed), [committed]);
-  const svg = useMemo(() => veinSvg(result.d, committed.color), [result, committed.color]);
-  const twoTone = useMemo(() => twoToneSvg(result.d, committed.color), [result, committed.color]);
+  const svg = useMemo(() => veinSvg(result.islandsD, committed.color), [result, committed.color]);
+  const twoTone = useMemo(() => twoToneSvg(result.islandsD, committed.color), [result, committed.color]);
   const bgUrl = useMemo(() => `url("data:image/svg+xml;utf8,${encodeURIComponent(svg)}")`, [svg]);
   const kb = (new Blob([svg]).size / 1024).toFixed(1);
   const pending = draft !== committed;
@@ -127,8 +128,8 @@ export default function KintsugiGeneratorPage() {
       <div className="mb-6">
         <h1 className="mb-1 text-xl font-bold text-white">Kintsugi background generator</h1>
         <p className="text-sm" style={{ color: 'var(--text2)' }}>
-          Experimental. Islands are generated and the gold veins are the gaps between them. Settings are in the URL, so
-          copy it to share a result.
+          Experimental. A solid gold canvas with dark islands on top: the islands are the only shapes, and the veins are
+          the gold showing through. Settings are in the URL, so copy it to share a result.
         </p>
       </div>
 
@@ -177,8 +178,8 @@ export default function KintsugiGeneratorPage() {
                 </span>
                 <input
                   type="range"
-                  min={s.min}
-                  max={s.max}
+                  min={RANGES[s.key][0]}
+                  max={RANGES[s.key][1]}
                   step={s.step}
                   value={draft[s.key]}
                   onChange={e => set(s.key, Number(e.target.value))}
@@ -218,21 +219,24 @@ export default function KintsugiGeneratorPage() {
               </button>
             ))}
             <span className="ml-auto text-xs tabular-nums" style={{ color: 'var(--text3)' }}>
-              {pending ? 'generating…' : `${result.ms} ms · ${kb} KB · ${result.contours} contours · ${result.points} pts`}
+              {pending ? 'generating…' : `${result.ms} ms · ${kb} KB · ${result.islands} islands · ${result.tips.length} tips · ${result.curves} curves`}
             </span>
           </div>
 
           <div className="overflow-hidden rounded-xl" style={{ border: '1px solid rgba(200,155,60,0.12)', opacity: pending ? 0.6 : 1, transition: 'opacity 0.2s' }}>
             {preview === 'raw' && (
-              <svg viewBox={`0 0 ${CANVAS.width} ${CANVAS.height}`} className="block w-full" style={{ background: '#080808' }}>
-                <path fill={committed.color} fillRule="evenodd" d={result.d} />
+              <svg viewBox={`0 0 ${CANVAS.width} ${CANVAS.height}`} className="block w-full">
+                <rect width={CANVAS.width} height={CANVAS.height} fill={committed.color} />
+                <path fill="#080808" d={result.islandsD} />
               </svg>
             )}
 
-            {preview === 'twotone' && (
-              <svg viewBox={`0 0 ${CANVAS.width} ${CANVAS.height}`} className="block w-full">
-                <rect width={CANVAS.width} height={CANVAS.height} fill="#080808" />
-                <path fill={committed.color} fillRule="evenodd" d={result.d} />
+            {preview === 'outline' && (
+              <svg viewBox={`0 0 ${CANVAS.width} ${CANVAS.height}`} className="block w-full" style={{ background: '#080808' }}>
+                <path fill="rgba(200,145,60,0.06)" stroke={committed.color} strokeWidth={1.5} d={result.islandsD} />
+                {result.tips.map(([x, y], i) => (
+                  <circle key={i} cx={x} cy={y} r={4} fill="none" stroke="#e8c86a" strokeWidth={1.5} />
+                ))}
               </svg>
             )}
 
