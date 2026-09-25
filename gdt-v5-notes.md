@@ -38,6 +38,16 @@ Open questions:
 - Static illustration vs. something animated to match the existing spinning-badge treatment?
 - Does this replace the polyhedra badges outright, or sit alongside them (e.g. mascot as a bigger "profile banner" reveal, polyhedra staying as the compact badge row)?
 
+### Streak badge "unlocked" toast
+The milestone trigger itself is verified end-to-end (`npm run test:streak-trigger` — every tier unlocks at its exact threshold, `streak_best` survives a broken streak). But nothing tells the user in the moment: `POST /tracker/streak` already returns `streakBest`, and the dashboard/home `checkStreak` handlers ignore it, so a newly earned badge only shows up if the user happens to visit `/profile`.
+
+Idea: when `streakBest` crosses a tier threshold (compare `highestEarnedTier(prevBest)` vs `highestEarnedTier(streakBest)` from `_lib/badges.ts`), show a toast with the tier's `PolyhedronBadge` + "Iron badge unlocked — 7-day streak", linking to `/profile`. Fire alongside the existing all-complete confetti.
+
+Open questions:
+- Where does `prevBest` come from — fetch profile on mount, or have the API return a `tierUnlocked` field so the client doesn't need to diff?
+- Dedup across refreshes (like `gdt_confetti_date`) so it only fires once per tier?
+- Anon users have no `streak_best` — skip, or track a local best in `gdt_streak`?
+
 ### Hoyolab API sync
 Allow users to sync in-game daily progress automatically via the Hoyolab API (Genshin Impact, Honkai: Star Rail, Zenless Zone Zero, etc.). Most viable first target given Hoyoverse's documented API.
 

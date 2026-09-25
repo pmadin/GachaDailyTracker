@@ -196,7 +196,7 @@ body {
   .hero-anim, .hero-panel { animation: none; }
 }
 
-/* ── Streak badge 3D spin (profile page + /dev/badges preview) ── */
+/* ── Streak badge 3D spin (profile page + /admin/badges preview) ── */
 .gdt-badge-spin {
   animation: gdt-badge-spin 8s linear infinite;
 }
