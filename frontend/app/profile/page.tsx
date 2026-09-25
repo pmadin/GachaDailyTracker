@@ -440,24 +440,79 @@ export default function ProfilePage() {
 
       {/* Streak Badges */}
       <div className="kintsugi-card mb-6 rounded-xl p-6" style={{ border: '1px solid rgba(200,155,60,0.12)', background: 'var(--bg2)' }}>
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-base font-semibold text-white">Streak Badges</h2>
-          {streakInfo && (
-            <span className="text-xs" style={{ color: 'var(--text2)' }}>
-              Best streak: <span className="font-medium text-white">{streakInfo.streak_best}</span> day
-              {streakInfo.streak_best === 1 ? '' : 's'}
-              {(() => {
-                const current = highestEarnedTier(streakInfo.streak_best);
-                return current ? (
+        <h2 className="mb-4 text-base font-semibold text-white">Streak Badges</h2>
+
+        {streakInfo && (() => {
+          const current = streakInfo.streak_count;
+          const best = streakInfo.streak_best;
+          const bestTier = highestEarnedTier(best);
+          // The next badge is the first one the best-ever streak hasn't reached; the current
+          // streak has to climb to its threshold to earn it.
+          const nextTier = STREAK_TIERS.find(t => t.days > best) ?? null;
+          const progress = nextTier ? Math.min(current / nextTier.days, 1) : 1;
+          const daysLeft = nextTier ? nextTier.days - current : 0;
+
+          return (
+            <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-[1.4fr_1fr]">
+              <div className="rounded-lg p-4" style={{ background: 'rgba(200,155,60,0.06)', border: '1px solid rgba(200,155,60,0.18)' }}>
+                <p className="mb-1 text-[11px] uppercase tracking-wider" style={{ color: 'var(--text2)' }}>
+                  Current streak
+                </p>
+                <p className="flex items-baseline gap-1.5">
+                  <span
+                    className="text-4xl font-extrabold leading-none tabular-nums"
+                    style={{
+                      background: current > 0 ? 'linear-gradient(135deg, #c8913c, #e8c86a)' : 'none',
+                      WebkitBackgroundClip: current > 0 ? 'text' : undefined,
+                      backgroundClip: current > 0 ? 'text' : undefined,
+                      color: current > 0 ? 'transparent' : 'var(--text3)',
+                    }}
+                  >
+                    {current}
+                  </span>
+                  <span className="text-sm" style={{ color: 'var(--text2)' }}>
+                    day{current === 1 ? '' : 's'}
+                  </span>
+                </p>
+
+                {nextTier ? (
                   <>
-                    {' · '}
-                    <span style={{ color: 'var(--gold-bright)' }}>{current.label}</span>
+                    <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full" style={{ background: 'rgba(200,155,60,0.10)' }}>
+                      <div
+                        className="h-full rounded-full"
+                        style={{ width: `${progress * 100}%`, background: 'linear-gradient(90deg, #c8913c, #e8c86a)' }}
+                      />
+                    </div>
+                    <p className="mt-1.5 text-xs" style={{ color: 'var(--text2)' }}>
+                      {current === 0
+                        ? `Finish all your games today to start a streak. ${nextTier.label} unlocks at ${nextTier.days} days.`
+                        : <>{daysLeft} more day{daysLeft === 1 ? '' : 's'} to <span style={{ color: 'var(--gold-bright)' }}>{nextTier.label}</span></>}
+                    </p>
                   </>
-                ) : null;
-              })()}
-            </span>
-          )}
-        </div>
+                ) : (
+                  <p className="mt-3 text-xs" style={{ color: 'var(--gold-bright)' }}>
+                    Every badge earned. Keep it going.
+                  </p>
+                )}
+              </div>
+
+              <div className="rounded-lg p-4" style={{ background: 'var(--bg3)', border: '1px solid rgba(200,155,60,0.12)' }}>
+                <p className="mb-1 text-[11px] uppercase tracking-wider" style={{ color: 'var(--text2)' }}>
+                  Best streak
+                </p>
+                <p className="flex items-baseline gap-1.5">
+                  <span className="text-2xl font-bold leading-none text-white tabular-nums">{best}</span>
+                  <span className="text-sm" style={{ color: 'var(--text2)' }}>
+                    day{best === 1 ? '' : 's'}
+                  </span>
+                </p>
+                <p className="mt-3 text-xs" style={{ color: bestTier ? 'var(--gold-bright)' : 'var(--text3)' }}>
+                  {bestTier ? `${bestTier.label} tier` : 'No badge yet'}
+                </p>
+              </div>
+            </div>
+          );
+        })()}
         <p className="mb-4 text-xs" style={{ color: 'var(--text3)' }}>
           Earned at your best-ever streak — kept forever, even if the streak later breaks.
         </p>
