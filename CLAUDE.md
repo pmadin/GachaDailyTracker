@@ -6,6 +6,17 @@ Daily-reset tracker for 330+ gacha games. Users browse a game list, add games to
 
 ---
 
+## Writing Style: go easy on em dashes
+
+Applies to everything written for this project: UI copy, code comments, docs/notes (`CLAUDE.md`, `gdt-v5-notes.md`), commit messages, PR descriptions.
+
+- Keep em dashes (`—`) rare, roughly 5–10% of sentences at most. Not banned, just not the default.
+- Reach for a comma, a period, a colon, or just rephrase. Casual phrasing without any punctuation break is often the most natural.
+- Exception: the decorative mono brand labels (`— GACHA DAILY TRACKER —`, `— ERROR 404 —`) are intentional and stay.
+- Don't bulk-rewrite old text just to strip dashes; apply this to anything new or anything you're already editing.
+
+---
+
 ## Monorepo Layout
 
 ```
