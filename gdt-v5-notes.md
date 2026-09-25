@@ -51,6 +51,14 @@ Open questions:
 ### 404 mascot
 `frontend/app/not-found.tsx` shipped as a simple on-brand page: gold "404" with a kintsugi crack, vein background, "This banner has already ended." copy, Home / Browse games buttons. Planned upgrade: a dazed chibi anime-girl face with swirly spiral (@_@) eyes above/beside the 404. Same art direction as the streak badge mascot idea above, so ideally the same character. Keep it a static SVG/PNG (no JS) so the 404 stays a zero-JS Server Component. Maybe a slow spin on the swirl eyes via CSS only.
 
+### Kintsugi background generator
+Experimental admin page at `/admin/kintsugi` (`frontend/app/admin/kintsugi/`). Generates vein SVGs procedurally instead of tracing Gemini images in Illustrator: it builds dark "islands" (warped Voronoi cells) and the gold veins are the gaps between them. Seeded and URL-driven, with Network and Trunks presets, in-situ previews (login, homepage hero, card hover) and SVG / two-tone export.
+
+Follow-ups:
+- **Vein hierarchy.** The references read like a river delta, thick veins splitting into thinner ones. The generator currently gives a mesh with random per-vein widths. Idea: scale width by distance from the trunks (or a low-frequency "flow" field) so veins thin out as they branch away.
+- **Broken card hover.** `.kintsugi-card::before` in `globals.css` points at `/kintsugi-veins.svg`, which doesn't exist, so the hover vein effect never shows and every page with a kintsugi card makes a 404 request. Generate one with the tool, save it as `frontend/public/kintsugi-veins.svg`, and check the hover.
+- Once a few generated backgrounds look right, give each auth page its own instead of rotating the same login SVG.
+
 ### Hoyolab API sync
 Allow users to sync in-game daily progress automatically via the Hoyolab API (Genshin Impact, Honkai: Star Rail, Zenless Zone Zero, etc.). Most viable first target given Hoyoverse's documented API.
 
