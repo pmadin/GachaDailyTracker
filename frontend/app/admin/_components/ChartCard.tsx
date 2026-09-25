@@ -22,7 +22,7 @@ export default function ChartCard({
 
   return (
     <div
-      className="kintsugi-card rounded-xl p-5"
+      className="kintsugi-card no-veins rounded-xl p-5"
       style={{ border: '1px solid rgba(200,155,60,0.12)', background: 'var(--bg2)' }}
     >
       <div className="mb-4 flex items-start justify-between gap-3">

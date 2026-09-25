@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, FormEvent } from 'react';
+import { useState, useEffect, useCallback, useSyncExternalStore, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '../_context/AuthContext';
 import {
@@ -94,6 +94,18 @@ function urlBase64ToUint8Array(base64String: string): ArrayBuffer {
   return arr.buffer as ArrayBuffer;
 }
 
+const noopSubscribe = () => () => {};
+const detectPushSupport = () =>
+  'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+const detectIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent);
+const STANDALONE_QUERY = '(display-mode: standalone)';
+const detectStandalone = () => window.matchMedia(STANDALONE_QUERY).matches;
+function subscribeStandalone(onChange: () => void) {
+  const mq = window.matchMedia(STANDALONE_QUERY);
+  mq.addEventListener('change', onChange);
+  return () => mq.removeEventListener('change', onChange);
+}
+
 export default function ProfilePage() {
   const router = useRouter();
   const { token, user, login, logout, isLoading } = useAuth();
@@ -105,16 +117,17 @@ export default function ProfilePage() {
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [confirming, setConfirming] = useState(false);
 
-  // Notification state
-  const [notifSupported, setNotifSupported] = useState(false);
+  // Notification state. Browser capability checks read via useSyncExternalStore: `false` on the
+  // server (matches the pre-hydration render), real values on the client, no setState-in-effect.
+  const notifSupported = useSyncExternalStore(noopSubscribe, detectPushSupport, () => false);
+  const isIOS = useSyncExternalStore(noopSubscribe, detectIOS, () => false);
+  const isStandalone = useSyncExternalStore(subscribeStandalone, detectStandalone, () => false);
   const [notifEnabled, setNotifEnabled] = useState(false);
   const [notifOffset, setNotifOffset] = useState(30);
   const [notifLoading, setNotifLoading] = useState(false);
   const [notifError, setNotifError] = useState('');
   const [applyLoading, setApplyLoading] = useState(false);
   const [applyResult, setApplyResult] = useState('');
-  const [isIOS, setIsIOS] = useState(false);
-  const [isStandalone, setIsStandalone] = useState(false);
 
   // Change password state
   const [showPwForm, setShowPwForm] = useState(false);
@@ -148,23 +161,17 @@ export default function ProfilePage() {
     if (!isLoading && !user) router.push('/login');
   }, [isLoading, user, router]);
 
-  useEffect(() => {
+  // Prefill the delete-account identifier and timezone picker whenever the signed-in user
+  // changes. Done during render against the last-seen user (React's "adjust state when a prop
+  // changes" pattern) rather than in an effect, which would render once with stale values.
+  const [prefilledFor, setPrefilledFor] = useState<typeof user>(null);
+  if (user !== prefilledFor) {
+    setPrefilledFor(user);
     if (user) {
       setIdentifier(user.username);
       if (user.timezone) setTimezone(user.timezone);
     }
-  }, [user]);
-
-  useEffect(() => {
-    setNotifSupported(
-      typeof window !== 'undefined' &&
-      'serviceWorker' in navigator &&
-      'PushManager' in window &&
-      'Notification' in window
-    );
-    setIsIOS(/iPad|iPhone|iPod/.test(navigator.userAgent));
-    setIsStandalone(window.matchMedia('(display-mode: standalone)').matches);
-  }, []);
+  }
 
   useEffect(() => {
     if (!token) return;
@@ -421,7 +428,7 @@ export default function ProfilePage() {
       <h1 className="mb-8 text-2xl font-bold text-white">Profile</h1>
 
       {/* Account info */}
-      <div className="kintsugi-card mb-6 rounded-xl p-6 space-y-4" style={{ border: '1px solid rgba(200,155,60,0.12)', background: 'var(--bg2)' }}>
+      <div className="kintsugi-card no-veins mb-6 rounded-xl p-6 space-y-4" style={{ border: '1px solid rgba(200,155,60,0.12)', background: 'var(--bg2)' }}>
         <div className="flex items-center justify-between">
           <span className="text-sm text-zinc-500">Username</span>
           <span className="text-sm font-medium text-white">{user.username}</span>
@@ -439,25 +446,80 @@ export default function ProfilePage() {
       </div>
 
       {/* Streak Badges */}
-      <div className="kintsugi-card mb-6 rounded-xl p-6" style={{ border: '1px solid rgba(200,155,60,0.12)', background: 'var(--bg2)' }}>
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-base font-semibold text-white">Streak Badges</h2>
-          {streakInfo && (
-            <span className="text-xs" style={{ color: 'var(--text2)' }}>
-              Best streak: <span className="font-medium text-white">{streakInfo.streak_best}</span> day
-              {streakInfo.streak_best === 1 ? '' : 's'}
-              {(() => {
-                const current = highestEarnedTier(streakInfo.streak_best);
-                return current ? (
+      <div className="kintsugi-card no-veins mb-6 rounded-xl p-6" style={{ border: '1px solid rgba(200,155,60,0.12)', background: 'var(--bg2)' }}>
+        <h2 className="mb-4 text-base font-semibold text-white">Streak Badges</h2>
+
+        {streakInfo && (() => {
+          const current = streakInfo.streak_count;
+          const best = streakInfo.streak_best;
+          const bestTier = highestEarnedTier(best);
+          // The next badge is the first one the best-ever streak hasn't reached; the current
+          // streak has to climb to its threshold to earn it.
+          const nextTier = STREAK_TIERS.find(t => t.days > best) ?? null;
+          const progress = nextTier ? Math.min(current / nextTier.days, 1) : 1;
+          const daysLeft = nextTier ? nextTier.days - current : 0;
+
+          return (
+            <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-[1.4fr_1fr]">
+              <div className="rounded-lg p-4" style={{ background: 'rgba(200,155,60,0.06)', border: '1px solid rgba(200,155,60,0.18)' }}>
+                <p className="mb-1 text-[11px] uppercase tracking-wider" style={{ color: 'var(--text2)' }}>
+                  Current streak
+                </p>
+                <p className="flex items-baseline gap-1.5">
+                  <span
+                    className="text-4xl font-extrabold leading-none tabular-nums"
+                    style={{
+                      background: current > 0 ? 'linear-gradient(135deg, #c8913c, #e8c86a)' : 'none',
+                      WebkitBackgroundClip: current > 0 ? 'text' : undefined,
+                      backgroundClip: current > 0 ? 'text' : undefined,
+                      color: current > 0 ? 'transparent' : 'var(--text3)',
+                    }}
+                  >
+                    {current}
+                  </span>
+                  <span className="text-sm" style={{ color: 'var(--text2)' }}>
+                    day{current === 1 ? '' : 's'}
+                  </span>
+                </p>
+
+                {nextTier ? (
                   <>
-                    {' · '}
-                    <span style={{ color: 'var(--gold-bright)' }}>{current.label}</span>
+                    <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full" style={{ background: 'rgba(200,155,60,0.10)' }}>
+                      <div
+                        className="h-full rounded-full"
+                        style={{ width: `${progress * 100}%`, background: 'linear-gradient(90deg, #c8913c, #e8c86a)' }}
+                      />
+                    </div>
+                    <p className="mt-1.5 text-xs" style={{ color: 'var(--text2)' }}>
+                      {current === 0
+                        ? `Finish all your games today to start a streak. ${nextTier.label} unlocks at ${nextTier.days} days.`
+                        : <>{daysLeft} more day{daysLeft === 1 ? '' : 's'} to <span style={{ color: 'var(--gold-bright)' }}>{nextTier.label}</span></>}
+                    </p>
                   </>
-                ) : null;
-              })()}
-            </span>
-          )}
-        </div>
+                ) : (
+                  <p className="mt-3 text-xs" style={{ color: 'var(--gold-bright)' }}>
+                    Every badge earned. Keep it going.
+                  </p>
+                )}
+              </div>
+
+              <div className="rounded-lg p-4" style={{ background: 'var(--bg3)', border: '1px solid rgba(200,155,60,0.12)' }}>
+                <p className="mb-1 text-[11px] uppercase tracking-wider" style={{ color: 'var(--text2)' }}>
+                  Best streak
+                </p>
+                <p className="flex items-baseline gap-1.5">
+                  <span className="text-2xl font-bold leading-none text-white tabular-nums">{best}</span>
+                  <span className="text-sm" style={{ color: 'var(--text2)' }}>
+                    day{best === 1 ? '' : 's'}
+                  </span>
+                </p>
+                <p className="mt-3 text-xs" style={{ color: bestTier ? 'var(--gold-bright)' : 'var(--text3)' }}>
+                  {bestTier ? `${bestTier.label} tier` : 'No badge yet'}
+                </p>
+              </div>
+            </div>
+          );
+        })()}
         <p className="mb-4 text-xs" style={{ color: 'var(--text3)' }}>
           Earned at your best-ever streak — kept forever, even if the streak later breaks.
         </p>
@@ -480,7 +542,7 @@ export default function ProfilePage() {
       </div>
 
       {/* Change Password */}
-      <div className="kintsugi-card mb-6 rounded-xl p-6" style={{ border: '1px solid rgba(200,155,60,0.12)', background: 'var(--bg2)' }}>
+      <div className="kintsugi-card no-veins mb-6 rounded-xl p-6" style={{ border: '1px solid rgba(200,155,60,0.12)', background: 'var(--bg2)' }}>
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-base font-semibold text-white">Password</h2>
@@ -556,7 +618,7 @@ export default function ProfilePage() {
       </div>
 
       {/* Change Email */}
-      <div className="kintsugi-card mb-6 rounded-xl p-6" style={{ border: '1px solid rgba(200,155,60,0.12)', background: 'var(--bg2)' }}>
+      <div className="kintsugi-card no-veins mb-6 rounded-xl p-6" style={{ border: '1px solid rgba(200,155,60,0.12)', background: 'var(--bg2)' }}>
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-base font-semibold text-white">Email</h2>
@@ -617,7 +679,7 @@ export default function ProfilePage() {
       </div>
 
       {/* Push Notifications */}
-      <div className="kintsugi-card mb-6 rounded-xl p-6" style={{ border: '1px solid rgba(200,155,60,0.12)', background: 'var(--bg2)' }}>
+      <div className="kintsugi-card no-veins mb-6 rounded-xl p-6" style={{ border: '1px solid rgba(200,155,60,0.12)', background: 'var(--bg2)' }}>
         <h2 className="mb-1 text-base font-semibold text-white">Push Notifications</h2>
         <p className="mb-5 text-sm text-zinc-500">
           Get reminded before your daily resets, even when the app is closed.
@@ -700,7 +762,7 @@ export default function ProfilePage() {
       </div>
 
       {/* Email Digest */}
-      <div className="kintsugi-card mb-6 rounded-xl p-6" style={{ border: '1px solid rgba(200,155,60,0.12)', background: 'var(--bg2)' }}>
+      <div className="kintsugi-card no-veins mb-6 rounded-xl p-6" style={{ border: '1px solid rgba(200,155,60,0.12)', background: 'var(--bg2)' }}>
         <div className="flex items-center justify-between mb-4">
           <div>
             <h2 className="text-base font-semibold text-white">Daily Email Digest</h2>
@@ -755,7 +817,7 @@ export default function ProfilePage() {
       </div>
 
       {/* Timezone */}
-      <div className="kintsugi-card mb-6 rounded-xl p-6" style={{ border: '1px solid var(--border)', background: 'var(--surface)' }}>
+      <div className="kintsugi-card no-veins mb-6 rounded-xl p-6" style={{ border: '1px solid var(--border)', background: 'var(--surface)' }}>
         <h2 className="mb-1 text-base font-semibold" style={{ color: 'var(--text)' }}>Timezone</h2>
         <p className="mb-5 text-sm" style={{ color: 'var(--text2)' }}>
           Controls when your daily reset timers count down. Set this to wherever you actually play.

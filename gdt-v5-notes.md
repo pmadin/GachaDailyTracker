@@ -38,6 +38,31 @@ Open questions:
 - Static illustration vs. something animated to match the existing spinning-badge treatment?
 - Does this replace the polyhedra badges outright, or sit alongside them (e.g. mascot as a bigger "profile banner" reveal, polyhedra staying as the compact badge row)?
 
+### Streak badge "unlocked" toast
+The milestone trigger itself is verified end-to-end (`npm run test:streak-trigger`: every tier unlocks at its exact threshold, `streak_best` survives a broken streak). But nothing tells the user in the moment: `POST /tracker/streak` already returns `streakBest`, and the dashboard/home `checkStreak` handlers ignore it, so a newly earned badge only shows up if the user happens to visit `/profile`.
+
+Idea: when `streakBest` crosses a tier threshold (compare `highestEarnedTier(prevBest)` vs `highestEarnedTier(streakBest)` from `_lib/badges.ts`), show a toast with the tier's `PolyhedronBadge` + "Iron badge unlocked, 7-day streak", linking to `/profile`. Fire alongside the existing all-complete confetti.
+
+Open questions:
+- Where does `prevBest` come from? Fetch profile on mount, or have the API return a `tierUnlocked` field so the client doesn't need to diff?
+- Dedup across refreshes (like `gdt_confetti_date`) so it only fires once per tier?
+- Anon users have no `streak_best`. Skip, or track a local best in `gdt_streak`?
+
+### 404 mascot
+`frontend/app/not-found.tsx` shipped as a simple on-brand page: gold "404" with a kintsugi crack, vein background, "This banner has already ended." copy, Home / Browse games buttons. Planned upgrade: a dazed chibi anime-girl face with swirly spiral (@_@) eyes above/beside the 404. Same art direction as the streak badge mascot idea above, so ideally the same character. Keep it a static SVG/PNG (no JS) so the 404 stays a zero-JS Server Component. Maybe a slow spin on the swirl eyes via CSS only.
+
+### Kintsugi background generator
+Experimental admin page at `/admin/kintsugi` (`frontend/app/admin/kintsugi/`). Generates backgrounds procedurally instead of tracing Gemini images in Illustrator. Islands are the only shapes: a solid gold canvas with dark islands on top, and the veins are the gold showing through.
+
+The islands come from sequential cracking, the way real pottery breaks. The generator repeatedly grows a smooth crack through the biggest island until both ends hit older cracks, which gives T-junctions (smooth through-sides, sharp acute tips) and older-thicker/newer-thinner veins. Each island outline is then fitted with long Bézier curves, keeping tips only where the outline really turns sharply. An earlier Voronoi version gave symmetric Y-junctions, which read as turtle shell or onion cells, so it was dropped.
+
+Seeded and URL-driven, with Delta and Trunks presets, island-outline and in-situ previews (login, homepage hero, card hover) and SVG / two-tone export.
+
+Follow-ups:
+- Generation takes ~1 s. Fine for a tool, but a Web Worker would keep slider drags smooth.
+- **Broken card hover.** `.kintsugi-card::before` in `globals.css` points at `/kintsugi-veins.svg`, which doesn't exist, so the hover vein effect never shows and every page with a kintsugi card makes a 404 request. Generate one with the tool, save it as `frontend/public/kintsugi-veins.svg`, and check the hover.
+- Once a few generated backgrounds look right, give each auth page its own instead of rotating the same login SVG.
+
 ### Hoyolab API sync
 Allow users to sync in-game daily progress automatically via the Hoyolab API (Genshin Impact, Honkai: Star Rail, Zenless Zone Zero, etc.). Most viable first target given Hoyoverse's documented API.
 

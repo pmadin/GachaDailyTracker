@@ -126,7 +126,7 @@ function FaceGroup({ faces, tier, locked, spin, reverse }: {
  *
  * `locked`: desaturated grey faces, dimmed opacity, and the spin PAUSED (not just recolored) —
  * a static, dead badge reads as "not earned" more clearly than a still-spinning grey one.
- * `spin`: defaults to true (used on /profile). /dev/badges can pass false for a stable, static
+ * `spin`: defaults to true (used on /profile). /admin/badges can pass false for a stable, static
  * render — much easier to check the raw geometry against, since it isn't a moving target.
  */
 export default function PolyhedronBadge({

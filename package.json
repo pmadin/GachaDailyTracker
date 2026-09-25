@@ -14,6 +14,8 @@
     "test:sync": "ts-node --transpile-only test/sync/syncPlan.test.ts",
     "test:mask": "ts-node --transpile-only test/utils/mask.test.ts",
     "test:streak": "ts-node --transpile-only test/streak/tierLookup.test.ts",
+    "test:streak-trigger": "ts-node --transpile-only test/streak/badgeTrigger.test.ts",
+    "test:streak-trigger:cleanup": "ts-node --transpile-only test/streak/badge-trigger-cleanup.ts",
     "kill": "npx kill-port 3000 4000",
     "download-game-data": "node scripts/download-game-data.js",
     "convert-to-csv": "node scripts/convert-json-to-csv.js",

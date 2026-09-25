@@ -6,7 +6,7 @@
 export default function StatTile({ label, value, sublabel }: { label: string; value: string; sublabel?: string }) {
   return (
     <div
-      className="kintsugi-card rounded-xl p-5"
+      className="kintsugi-card no-veins rounded-xl p-5"
       style={{ border: '1px solid rgba(200,155,60,0.12)', background: 'var(--bg2)' }}
     >
       <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">{label}</p>

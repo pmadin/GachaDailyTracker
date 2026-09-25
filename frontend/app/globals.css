@@ -102,21 +102,26 @@ body {
 .feature-card:hover { background: var(--bg3); }
 
 /* ── Kintsugi card ──
-   Vein texture fades in on hover via the static SVG file in /public.
+   Vein texture fades in on hover via the static SVG file in /public. Generated with
+   /admin/kintsugi, seed 833181 (the number in the filename).
    opacity: 0 at rest so cards look clean by default.
    pointer-events: none so the pseudo-element never blocks clicks.
+   isolation + z-index: -1 keep the veins above the card's background but below its content;
+   without them the absolutely positioned layer paints over the card's text.
 */
 .kintsugi-card {
   border: 1px solid rgba(200,155,60,0.12);
   transition: border-color 0.2s;
   position: relative;
   overflow: hidden;
+  isolation: isolate;
 }
 .kintsugi-card::before {
   content: '';
   position: absolute;
   inset: 0;
-  background-image: url('/kintsugi-veins.svg');
+  z-index: -1;
+  background-image: url('/kintsugi-veins-833181.svg');
   background-size: cover;
   background-position: center;
   opacity: 0;
@@ -124,7 +129,10 @@ body {
   pointer-events: none;
 }
 .kintsugi-card:hover { border-color: rgba(200,155,60,0.28); }
-.kintsugi-card:hover::before { opacity: 0.5; }
+.kintsugi-card:hover::before { opacity: 0.2; }
+/* Same card, no vein texture: for data-heavy or settings surfaces (admin, profile) where the
+   hover pattern distracts from what's being read. Keeps the border and hover border. */
+.kintsugi-card.no-veins::before { content: none; }
 
 /* ── Gold crack accent line bottom of cards ── */
 .crack-line::after {
@@ -196,7 +204,7 @@ body {
   .hero-anim, .hero-panel { animation: none; }
 }
 
-/* ── Streak badge 3D spin (profile page + /dev/badges preview) ── */
+/* ── Streak badge 3D spin (profile page + /admin/badges preview) ── */
 .gdt-badge-spin {
   animation: gdt-badge-spin 8s linear infinite;
 }

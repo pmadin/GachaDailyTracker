@@ -32,7 +32,9 @@
       "Bash(grep -rn \"124,58,237\\\\|139,92,246\\\\|7c3aed\\\\|a855f7\\\\|1a1a2e\\\\|0f0f1a\" app --include=\"*.tsx\" --include=\"*.css\")",
       "Bash(echo \"EXIT:$?\")",
       "Bash(npm run *)",
-      "mcp__magic__21st_magic_component_inspiration"
+      "mcp__magic__21st_magic_component_inspiration",
+      "mcp__heroku__pg_info",
+      "mcp__heroku__pg_backups"
     ],
     "deny": [],
     "ask": []
