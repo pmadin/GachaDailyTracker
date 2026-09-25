@@ -428,7 +428,7 @@ export default function ProfilePage() {
       <h1 className="mb-8 text-2xl font-bold text-white">Profile</h1>
 
       {/* Account info */}
-      <div className="kintsugi-card mb-6 rounded-xl p-6 space-y-4" style={{ border: '1px solid rgba(200,155,60,0.12)', background: 'var(--bg2)' }}>
+      <div className="kintsugi-card no-veins mb-6 rounded-xl p-6 space-y-4" style={{ border: '1px solid rgba(200,155,60,0.12)', background: 'var(--bg2)' }}>
         <div className="flex items-center justify-between">
           <span className="text-sm text-zinc-500">Username</span>
           <span className="text-sm font-medium text-white">{user.username}</span>
@@ -446,7 +446,7 @@ export default function ProfilePage() {
       </div>
 
       {/* Streak Badges */}
-      <div className="kintsugi-card mb-6 rounded-xl p-6" style={{ border: '1px solid rgba(200,155,60,0.12)', background: 'var(--bg2)' }}>
+      <div className="kintsugi-card no-veins mb-6 rounded-xl p-6" style={{ border: '1px solid rgba(200,155,60,0.12)', background: 'var(--bg2)' }}>
         <h2 className="mb-4 text-base font-semibold text-white">Streak Badges</h2>
 
         {streakInfo && (() => {
@@ -542,7 +542,7 @@ export default function ProfilePage() {
       </div>
 
       {/* Change Password */}
-      <div className="kintsugi-card mb-6 rounded-xl p-6" style={{ border: '1px solid rgba(200,155,60,0.12)', background: 'var(--bg2)' }}>
+      <div className="kintsugi-card no-veins mb-6 rounded-xl p-6" style={{ border: '1px solid rgba(200,155,60,0.12)', background: 'var(--bg2)' }}>
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-base font-semibold text-white">Password</h2>
@@ -618,7 +618,7 @@ export default function ProfilePage() {
       </div>
 
       {/* Change Email */}
-      <div className="kintsugi-card mb-6 rounded-xl p-6" style={{ border: '1px solid rgba(200,155,60,0.12)', background: 'var(--bg2)' }}>
+      <div className="kintsugi-card no-veins mb-6 rounded-xl p-6" style={{ border: '1px solid rgba(200,155,60,0.12)', background: 'var(--bg2)' }}>
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-base font-semibold text-white">Email</h2>
@@ -679,7 +679,7 @@ export default function ProfilePage() {
       </div>
 
       {/* Push Notifications */}
-      <div className="kintsugi-card mb-6 rounded-xl p-6" style={{ border: '1px solid rgba(200,155,60,0.12)', background: 'var(--bg2)' }}>
+      <div className="kintsugi-card no-veins mb-6 rounded-xl p-6" style={{ border: '1px solid rgba(200,155,60,0.12)', background: 'var(--bg2)' }}>
         <h2 className="mb-1 text-base font-semibold text-white">Push Notifications</h2>
         <p className="mb-5 text-sm text-zinc-500">
           Get reminded before your daily resets, even when the app is closed.
@@ -762,7 +762,7 @@ export default function ProfilePage() {
       </div>
 
       {/* Email Digest */}
-      <div className="kintsugi-card mb-6 rounded-xl p-6" style={{ border: '1px solid rgba(200,155,60,0.12)', background: 'var(--bg2)' }}>
+      <div className="kintsugi-card no-veins mb-6 rounded-xl p-6" style={{ border: '1px solid rgba(200,155,60,0.12)', background: 'var(--bg2)' }}>
         <div className="flex items-center justify-between mb-4">
           <div>
             <h2 className="text-base font-semibold text-white">Daily Email Digest</h2>
@@ -817,7 +817,7 @@ export default function ProfilePage() {
       </div>
 
       {/* Timezone */}
-      <div className="kintsugi-card mb-6 rounded-xl p-6" style={{ border: '1px solid var(--border)', background: 'var(--surface)' }}>
+      <div className="kintsugi-card no-veins mb-6 rounded-xl p-6" style={{ border: '1px solid var(--border)', background: 'var(--surface)' }}>
         <h2 className="mb-1 text-base font-semibold" style={{ color: 'var(--text)' }}>Timezone</h2>
         <p className="mb-5 text-sm" style={{ color: 'var(--text2)' }}>
           Controls when your daily reset timers count down. Set this to wherever you actually play.

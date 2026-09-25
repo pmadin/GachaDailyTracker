@@ -33,7 +33,7 @@ export default function AdminOverviewPage() {
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Link
           href="/admin/analytics"
-          className="kintsugi-card group rounded-xl p-6 transition-colors"
+          className="kintsugi-card no-veins group rounded-xl p-6 transition-colors"
           style={{ border: '1px solid rgba(200,155,60,0.12)', background: 'var(--bg2)' }}
         >
           <div
@@ -55,7 +55,7 @@ export default function AdminOverviewPage() {
 
         <Link
           href="/admin/games"
-          className="kintsugi-card group rounded-xl p-6 transition-colors"
+          className="kintsugi-card no-veins group rounded-xl p-6 transition-colors"
           style={{ border: '1px solid rgba(200,155,60,0.12)', background: 'var(--bg2)' }}
         >
           <div
@@ -81,7 +81,7 @@ export default function AdminOverviewPage() {
 
         <Link
           href="/admin/users"
-          className="kintsugi-card group rounded-xl p-6 transition-colors"
+          className="kintsugi-card no-veins group rounded-xl p-6 transition-colors"
           style={{ border: '1px solid rgba(200,155,60,0.12)', background: 'var(--bg2)' }}
         >
           <div
@@ -105,7 +105,7 @@ export default function AdminOverviewPage() {
 
         <Link
           href="/admin/submissions"
-          className="kintsugi-card group rounded-xl p-6 transition-colors"
+          className="kintsugi-card no-veins group rounded-xl p-6 transition-colors"
           style={{ border: '1px solid rgba(200,155,60,0.12)', background: 'var(--bg2)' }}
         >
           <div
@@ -128,7 +128,7 @@ export default function AdminOverviewPage() {
 
         <Link
           href="/admin/settings"
-          className="kintsugi-card group rounded-xl p-6 transition-colors"
+          className="kintsugi-card no-veins group rounded-xl p-6 transition-colors"
           style={{ border: '1px solid rgba(200,155,60,0.12)', background: 'var(--bg2)' }}
         >
           <div

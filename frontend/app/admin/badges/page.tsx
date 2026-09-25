@@ -43,7 +43,7 @@ export default function BadgesPreviewPage() {
         {STREAK_TIERS.map(tier => (
           <div
             key={tier.key}
-            className="kintsugi-card rounded-xl p-6"
+            className="kintsugi-card no-veins rounded-xl p-6"
             style={{ border: '1px solid rgba(200,155,60,0.12)', background: 'var(--bg2)' }}
           >
             <p className="mb-1 text-sm font-semibold text-white">{tier.label}</p>
@@ -64,7 +64,7 @@ export default function BadgesPreviewPage() {
         ))}
       </div>
 
-      <div className="mt-10 kintsugi-card rounded-xl p-6" style={{ border: '1px solid rgba(200,155,60,0.12)', background: 'var(--bg2)' }}>
+      <div className="mt-10 kintsugi-card no-veins rounded-xl p-6" style={{ border: '1px solid rgba(200,155,60,0.12)', background: 'var(--bg2)' }}>
         <p className="mb-4 text-sm font-semibold text-white">Large — all 6, earned, side by side</p>
         <div className="flex flex-wrap items-end justify-center gap-6">
           {STREAK_TIERS.map(tier => (

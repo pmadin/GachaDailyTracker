@@ -129,7 +129,10 @@ body {
   pointer-events: none;
 }
 .kintsugi-card:hover { border-color: rgba(200,155,60,0.28); }
-.kintsugi-card:hover::before { opacity: 0.3; }
+.kintsugi-card:hover::before { opacity: 0.2; }
+/* Same card, no vein texture: for data-heavy or settings surfaces (admin, profile) where the
+   hover pattern distracts from what's being read. Keeps the border and hover border. */
+.kintsugi-card.no-veins::before { content: none; }
 
 /* ── Gold crack accent line bottom of cards ── */
 .crack-line::after {

@@ -135,7 +135,7 @@ export default function KintsugiGeneratorPage() {
 
       <div className="grid gap-6 lg:grid-cols-[300px_1fr]">
         {/* ── Controls ── */}
-        <div className="kintsugi-card rounded-xl p-4" style={{ background: 'var(--bg2)' }}>
+        <div className="kintsugi-card no-veins rounded-xl p-4" style={{ background: 'var(--bg2)' }}>
           <div className="mb-4 flex items-end gap-2">
             <label className="flex-1 text-xs" style={{ color: 'var(--text2)' }}>
               Seed
