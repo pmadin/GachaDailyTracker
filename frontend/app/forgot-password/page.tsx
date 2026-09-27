@@ -42,9 +42,17 @@ export default function ForgotPasswordPage() {
             If an account exists for{' '}
             <span className="text-white">{email}</span>,
           </p>
-          <p className="mb-6 text-sm" style={{ color: 'var(--text2)' }}>
-            a reset link has been sent. Check your spam folder if you don't see it.
+          <p className="mb-4 text-sm" style={{ color: 'var(--text2)' }}>
+            a reset link has been sent. It expires in 30 minutes.
           </p>
+          <div
+            className="mb-6 rounded-lg px-4 py-3 text-left text-sm"
+            style={{ border: '1px solid rgba(200,155,60,0.28)', background: 'rgba(200,155,60,0.06)', color: 'var(--text)' }}
+          >
+            <span className="font-semibold" style={{ color: 'var(--gold-bright)' }}>Not in your inbox?</span>{' '}
+            Check your spam or junk folder. Some providers (Gmail especially) filter it there. Marking it
+            as &quot;Not spam&quot; helps future emails arrive normally.
+          </div>
           <Link
             href="/login"
             className="text-sm transition-colors"
@@ -78,7 +86,7 @@ export default function ForgotPasswordPage() {
       <div className="w-full max-w-sm" style={{ position: 'relative', zIndex: 1 }}>
         <h1 className="mb-2 text-center text-2xl font-bold text-white">Forgot password?</h1>
         <p className="mb-6 text-center text-sm" style={{ color: 'var(--text2)' }}>
-          Enter your email and we'll send you a reset link.
+          Enter your email and we&apos;ll send you a reset link. If it doesn&apos;t show up, check your spam folder.
         </p>
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
