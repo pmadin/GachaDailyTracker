@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useSyncExternalStore, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '../_context/AuthContext';
+import { hasBrowserPushSubscription } from '../_lib/push';
 import {
   deleteAccount,
   fetchVapidKey,
@@ -19,7 +20,7 @@ import {
   fetchProfile,
   type ProfileStreakInfo,
 } from '../_lib/api';
-import { STREAK_TIERS, highestEarnedTier } from '../_lib/badges';
+import { STREAK_TIERS, streakProgress } from '../_lib/badges';
 import PolyhedronBadge from '../_components/PolyhedronBadge';
 
 const TIMEZONE_OPTIONS = [
@@ -204,13 +205,7 @@ export default function ProfilePage() {
         }
         // Backend may still say enabled after the user disabled — verify
         // the browser actually holds an active subscription.
-        try {
-          const reg = await navigator.serviceWorker.getRegistration('/');
-          const sub = reg ? await reg.pushManager.getSubscription() : null;
-          setNotifEnabled(!!sub);
-        } catch {
-          setNotifEnabled(false);
-        }
+        setNotifEnabled(await hasBrowserPushSubscription());
       })
       .catch(() => {});
   }, [token, notifSupported]);
@@ -467,12 +462,7 @@ export default function ProfilePage() {
         {streakInfo && (() => {
           const current = streakInfo.streak_count;
           const best = streakInfo.streak_best;
-          const bestTier = highestEarnedTier(best);
-          // The next badge is the first one the best-ever streak hasn't reached; the current
-          // streak has to climb to its threshold to earn it.
-          const nextTier = STREAK_TIERS.find(t => t.days > best) ?? null;
-          const progress = nextTier ? Math.min(current / nextTier.days, 1) : 1;
-          const daysLeft = nextTier ? nextTier.days - current : 0;
+          const { bestTier, nextTier, progress, daysLeft } = streakProgress(current, best);
 
           return (
             <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-[1.4fr_1fr]">

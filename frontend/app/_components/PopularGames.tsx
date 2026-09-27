@@ -6,7 +6,7 @@ import ServerBadge from './ServerBadge';
 
 interface Props {
   games: PopularGame[];
-  context: 'logged-out' | 'empty' | 'has-games';
+  context: 'logged-out' | 'empty' | 'has-games' | 'personal';
   trackedIds: Set<number>;
   onAdd: (game: PopularGame) => Promise<void>;
 }
@@ -16,6 +16,7 @@ export default function PopularGames({ games, context, trackedIds, onAdd }: Prop
     'logged-out': 'Popular now',
     'empty': 'Popular now',
     'has-games': 'Popular now',
+    'personal': 'Popular with other players',
   }[context];
 
   return (
