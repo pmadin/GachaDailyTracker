@@ -17,6 +17,15 @@ Applies to everything written for this project: UI copy, code comments, docs/not
 
 ---
 
+## Git workflow: commit to `dev`, PRs are done by hand
+
+- Commit and push to `dev` only. `main` is a protected branch that only accepts pull requests, so never push or merge into `main` directly.
+- The GitHub CLI (`gh`) isn't installed and isn't needed. Don't offer to install it. The owner opens and merges PRs on the GitHub website.
+- After pushing to `dev`, follow up with a simple PR report the owner can paste in: a short title plus a brief description (what changed and why, and any related config/env changes that aren't in the diff). Include the compare link `https://github.com/pmadin/GachaDailyTracker/compare/main...dev`.
+- Don't add the `🤖 Generated with [Claude Code](https://claude.com/claude-code)` line to PR descriptions. Keep them plain.
+
+---
+
 ## Monorepo Layout
 
 ```
