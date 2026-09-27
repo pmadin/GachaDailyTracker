@@ -234,7 +234,22 @@ export default function ProfilePage() {
       await subscribePush(token!, sub.toJSON() as PushSubscriptionJSON);
       setNotifEnabled(true);
     } catch (err: unknown) {
-      setNotifError(err instanceof Error ? err.message : 'Failed to enable notifications');
+      // Chromium throws AbortError "Registration failed - push service error" when the browser
+      // can't reach its push service. Brave ships with Google push messaging switched off.
+      const isPushServiceError =
+        err instanceof Error && (err.name === 'AbortError' || /push service/i.test(err.message));
+      const isBrave = !!(navigator as Navigator & { brave?: unknown }).brave;
+      if (isPushServiceError && isBrave) {
+        setNotifError(
+          'Brave blocks push by default. Open brave://settings/privacy, turn on "Use Google services for push messaging", restart Brave, then try again.',
+        );
+      } else if (isPushServiceError) {
+        setNotifError(
+          "Your browser couldn't reach its push service. Check that push messaging isn't blocked by a privacy setting, extension, or VPN, then try again.",
+        );
+      } else {
+        setNotifError(err instanceof Error ? err.message : 'Failed to enable notifications');
+      }
     } finally {
       setNotifLoading(false);
     }
@@ -682,7 +697,9 @@ export default function ProfilePage() {
       <div className="kintsugi-card no-veins mb-6 rounded-xl p-6" style={{ border: '1px solid rgba(200,155,60,0.12)', background: 'var(--bg2)' }}>
         <h2 className="mb-1 text-base font-semibold text-white">Push Notifications</h2>
         <p className="mb-5 text-sm text-zinc-500">
-          Get reminded before your daily resets, even when the app is closed.
+          Get reminded before your daily resets, even when the app is closed. Reminders arrive as
+          browser push notifications through your system&apos;s notifications (e.g. Windows
+          notifications), so make sure they&apos;re allowed for your browser there too.
         </p>
 
         {!notifSupported ? (
