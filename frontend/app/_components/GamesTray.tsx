@@ -17,9 +17,11 @@ export interface TrayGame {
 interface Props {
   games: TrayGame[];
   onToggle: (gameId: number, done: boolean) => Promise<void>;
+  /** Skip the built-in progress bar (the logged-in home page shows it in its status row). */
+  hideProgress?: boolean;
 }
 
-export default function GamesTray({ games, onToggle }: Props) {
+export default function GamesTray({ games, onToggle, hideProgress = false }: Props) {
   const [tick, setTick] = useState(0);
   const [toggling, setToggling] = useState<Set<number>>(new Set());
 
@@ -60,35 +62,37 @@ export default function GamesTray({ games, onToggle }: Props) {
   return (
     <section>
       {/* Progress bar */}
-      <div style={{ marginBottom: 24 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-          <span
-            style={{
-              fontFamily: 'var(--font-jetbrains-mono)',
-              fontSize: 11,
-              color: 'var(--text3)',
-              letterSpacing: '0.07em',
-              textTransform: 'uppercase',
-            }}
-          >
-            Today&apos;s progress
-          </span>
-          <span style={{ fontFamily: 'var(--font-jetbrains-mono)', fontSize: 12, color: 'var(--text2)' }}>
-            {doneCount} / {total} done
-          </span>
+      {!hideProgress && (
+        <div style={{ marginBottom: 24 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <span
+              style={{
+                fontFamily: 'var(--font-jetbrains-mono)',
+                fontSize: 11,
+                color: 'var(--text3)',
+                letterSpacing: '0.07em',
+                textTransform: 'uppercase',
+              }}
+            >
+              Today&apos;s progress
+            </span>
+            <span style={{ fontFamily: 'var(--font-jetbrains-mono)', fontSize: 12, color: 'var(--text2)' }}>
+              {doneCount} / {total} done
+            </span>
+          </div>
+          <div style={{ height: 4, borderRadius: 2, background: 'var(--surface)', overflow: 'hidden' }}>
+            <div
+              style={{
+                height: '100%',
+                borderRadius: 2,
+                width: `${progress}%`,
+                background: 'linear-gradient(135deg, #c8913c, #e8c86a)',
+                transition: 'width 0.4s ease',
+              }}
+            />
+          </div>
         </div>
-        <div style={{ height: 4, borderRadius: 2, background: 'var(--surface)', overflow: 'hidden' }}>
-          <div
-            style={{
-              height: '100%',
-              borderRadius: 2,
-              width: `${progress}%`,
-              background: 'linear-gradient(135deg, #c8913c, #e8c86a)',
-              transition: 'width 0.4s ease',
-            }}
-          />
-        </div>
-      </div>
+      )}
 
       {/* Tray header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>

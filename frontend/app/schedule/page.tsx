@@ -9,6 +9,7 @@ import ScheduleModal from '../_components/ScheduleModal';
 import type { ScheduleFormData } from '../_components/ScheduleModal';
 import { displayServer } from '../_lib/servers';
 import { getLocalResetTime } from '../_lib/countdown';
+import { timeToMinutes, formatTime, isWindowActive } from '../_lib/scheduleTime';
 
 type View = 'day' | 'week' | 'month';
 
@@ -16,26 +17,6 @@ const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Frid
 const DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December'];
-
-function timeToMinutes(time: string): number {
-  const parts = time.split(':');
-  return parseInt(parts[0]) * 60 + parseInt(parts[1]);
-}
-
-function formatTime(time: string): string {
-  const parts = time.split(':');
-  const h = parseInt(parts[0]);
-  const m = parseInt(parts[1]);
-  const period = h >= 12 ? 'PM' : 'AM';
-  const h12 = h % 12 || 12;
-  return `${h12}:${m.toString().padStart(2, '0')} ${period}`;
-}
-
-function isWindowActive(windowStart: string, windowEnd: string): boolean {
-  const now = new Date();
-  const nowMinutes = now.getHours() * 60 + now.getMinutes();
-  return nowMinutes >= timeToMinutes(windowStart) && nowMinutes < timeToMinutes(windowEnd);
-}
 
 const SLOT_PX = 40;   // px per 30-min slot
 const HOUR_PX = SLOT_PX * 2;

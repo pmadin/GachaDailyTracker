@@ -26,6 +26,24 @@ Applies to everything written for this project: UI copy, code comments, docs/not
 
 ---
 
+## Live DB changes: migrate first, then deploy
+
+The live DB is Heroku Postgres and it is **not** migrated automatically. Every schema change is SQL someone has to run by hand, so follow this order:
+
+1. Add or change the column/table in `database/init/01-schema.sql` (CI and Docker build from it) **and** add the same SQL to the "Migrations run on Heroku" list below.
+2. Take a backup first: `heroku pg:backups:capture -a gachadailytracker` (or `npm run backup:pull` to also keep a local copy in `backups/`).
+3. Run the migration on Heroku (`heroku pg:psql -a gachadailytracker`) **before** merging to `main`. Write migrations so they're safe to re-run (`IF NOT EXISTS`, guarded `UPDATE`s).
+4. Merge. Heroku's release phase (`Procfile` → `node dist/scripts/checkSchema.js`) compares prod against `01-schema.sql` and **refuses the release** if a table or column is missing; the old version keeps serving. If that happens, run the missing migration and redeploy. Never remove the `release:` line to get a deploy through.
+5. After the deploy, check `heroku logs -a gachadailytracker` for query errors on the routes you touched, and `heroku releases:output -a gachadailytracker` shows the `✓ schema OK` line.
+
+Other rules:
+- Never test writes against prod. `npm run dev` points at live data; use `npm run local` (Docker) with a restored, scrubbed copy.
+- Backups: a daily schedule runs at 04:00 America/Los_Angeles (`heroku pg:backups:schedules -a gachadailytracker`, set 2026-09-28). Heroku keeps 7 daily + 1 weekly scheduled backups and the last 5 manual ones on `essential-0` (each ~110 KB, stored by Heroku). `npm run backup:pull` downloads a fresh one into gitignored `backups/`; run it weekly and before any risky DB work.
+- Heroku release numbers (`v59`, `v62`, …) are just Heroku's deploy/config counter, not the app's V4/V5 version.
+- **Why this exists:** in Sep 2026 `users.streak_best` shipped in code (Heroku release v59) without its migration. For ~4 days every streak update and `/auth/profile` returned 500, the nightly audit reset everyone to 0, and the leaderboard went empty. Streaks were rebuilt from a Sep 21 local dump plus `daily_completions`. CI didn't catch it because it builds a fresh DB from the schema file; `checkSchema` closes that gap.
+
+---
+
 ## Monorepo Layout
 
 ```
@@ -33,7 +51,7 @@ gacha_tracker/
 ├── src/                    # Express/TypeScript backend
 ├── frontend/               # Next.js 16 frontend (App Router)
 ├── data/                   # game-data-backup.json (330+ games)
-├── scripts/                # download-game-data.js, download-icons.js
+├── scripts/                # download-game-data.js, download-icons.js, backup-pull.js
 ├── database/init/          # 01-schema.sql
 └── test/postman/           # Postman collections
 ```
@@ -260,7 +278,7 @@ CREATE TABLE IF NOT EXISTS play_schedules (id SERIAL PRIMARY KEY, user_id INTEGE
 CREATE INDEX IF NOT EXISTS idx_play_schedules_user_id ON play_schedules(user_id);
 CREATE INDEX IF NOT EXISTS idx_play_schedules_game_id ON play_schedules(game_id);
 
--- v5 streak badges:
+-- v5 streak badges (run on Heroku 2026-09-27, after the outage above):
 ALTER TABLE users ADD COLUMN IF NOT EXISTS streak_best INTEGER NOT NULL DEFAULT 0;
 UPDATE users SET streak_best = streak_count WHERE streak_best < streak_count;
 ```
@@ -274,6 +292,8 @@ UPDATE users SET streak_best = streak_count WHERE streak_best < streak_count;
 npm run local        # Docker DB (.env)
 npm run dev          # Heroku DB (.env.development) — talks to PRODUCTION data; don't use for testing writes
 npm run db-reset     # restart Docker postgres (postgres:17, matches Heroku PG 17)
+npm run check:schema # verify a DB has every table/column in 01-schema.sql (uses DATABASE_URL, or .env); Heroku runs this as the release phase
+npm run backup:pull  # capture a Heroku backup and download it to backups/gdt-YYYY-MM-DD.dump
 
 # Realistic local data: back up prod (heroku pg:backups:capture + pg_dump -Fc into gitignored backups/),
 # then restore into Docker with pg_restore --no-owner --no-acl, skipping _heroku / EVENT TRIGGER /

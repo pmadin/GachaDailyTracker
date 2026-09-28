@@ -39,3 +39,26 @@ export function highestEarnedTier(streakBest: number): StreakTier | null {
   }
   return earned;
 }
+
+export interface StreakProgress {
+  bestTier: StreakTier | null;
+  /** First tier the best-ever streak hasn't reached yet, or null when every badge is earned. */
+  nextTier: StreakTier | null;
+  /** 0..1, how far the current streak is toward nextTier (1 when every badge is earned). */
+  progress: number;
+  daysLeft: number;
+}
+
+/**
+ * The next badge is the first one the best-ever streak hasn't reached; the current streak has
+ * to climb to its threshold to earn it. Shared by /profile and the home page status row.
+ */
+export function streakProgress(current: number, best: number): StreakProgress {
+  const nextTier = STREAK_TIERS.find(t => t.days > best) ?? null;
+  return {
+    bestTier: highestEarnedTier(best),
+    nextTier,
+    progress: nextTier ? Math.min(current / nextTier.days, 1) : 1,
+    daysLeft: nextTier ? Math.max(nextTier.days - current, 0) : 0,
+  };
+}

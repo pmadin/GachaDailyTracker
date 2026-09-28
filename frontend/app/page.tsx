@@ -9,8 +9,10 @@ import {
   unmarkComplete,
   addTrackerGame,
   checkStreak,
+  fetchProfile,
+  fetchSchedules,
 } from './_lib/api';
-import type { PopularGame } from './_lib/api';
+import type { PopularGame, Schedule } from './_lib/api';
 import {
   getAnonGames,
   markAnonComplete,
@@ -24,6 +26,9 @@ import EmptyDashboard from './_components/EmptyDashboard';
 import GamesTray, { type TrayGame } from './_components/GamesTray';
 import PopularGames from './_components/PopularGames';
 import FeaturesSection from './_components/FeaturesSection';
+import StatusRow from './_components/home/StatusRow';
+import TodayPlan from './_components/home/TodayPlan';
+import SetupChecklist from './_components/home/SetupChecklist';
 
 function todayISO(): string {
   return new Date().toISOString().slice(0, 10);
@@ -34,6 +39,10 @@ export default function HomePage() {
   const [myGames, setMyGames] = useState<TrayGame[]>([]);
   const [popular, setPopular] = useState<PopularGame[]>([]);
   const [myGamesLoading, setMyGamesLoading] = useState(true);
+  // Signed-in only
+  const [streak, setStreak] = useState(0);
+  const [streakBest, setStreakBest] = useState<number | null>(null);
+  const [schedules, setSchedules] = useState<Schedule[] | null>(null);
 
   useEffect(() => {
     if (authLoading) return;
@@ -41,6 +50,7 @@ export default function HomePage() {
     if (token) {
       fetchTrackerGames(token)
         .then(res => {
+          setStreak(res.streak ?? 0);
           setMyGames(res.games.map(g => ({
             id: g.game_id,
             name: g.name,
@@ -53,6 +63,12 @@ export default function HomePage() {
         })
         .catch(() => setMyGames([]))
         .finally(() => setMyGamesLoading(false));
+      fetchProfile(token)
+        .then(({ user }) => setStreakBest(user.streak_best))
+        .catch(() => {});
+      fetchSchedules(token)
+        .then(res => setSchedules(res.schedules))
+        .catch(() => setSchedules([]));
     } else {
       const anon = getAnonGames();
       setMyGames(anon.map(e => ({
@@ -69,7 +85,8 @@ export default function HomePage() {
   }, [token, authLoading]);
 
   useEffect(() => {
-    fetchPopularGames(10)
+    // Over-fetch so signed-in users still get ~10 rows after their tracked games are filtered out.
+    fetchPopularGames(20)
       .then(res => setPopular(res.games))
       .catch(() => setPopular([]));
   }, []);
@@ -96,7 +113,12 @@ export default function HomePage() {
       const isNowAllDone = currentDone + 1 === myGames.length && myGames.length > 0;
       if (isNowAllDone) {
         if (token) {
-          checkStreak(token).catch(() => {});
+          checkStreak(token)
+            .then(res => {
+              setStreak(res.streak);
+              setStreakBest(prev => Math.max(prev ?? 0, res.streak));
+            })
+            .catch(() => {});
         } else {
           updateAnonStreak();
         }
@@ -152,8 +174,13 @@ export default function HomePage() {
   const hasGames = myGames.length > 0;
   const loading = authLoading || myGamesLoading;
 
-  const popContext: 'logged-out' | 'empty' | 'has-games' =
-    hasGames ? 'has-games' : isLoggedIn ? 'empty' : 'logged-out';
+  const popContext: 'logged-out' | 'empty' | 'has-games' | 'personal' =
+    isLoggedIn ? 'personal' : hasGames ? 'has-games' : 'logged-out';
+  // Signed-in users only see games they don't already track; anon keeps the full top 10.
+  // Same rule as GET /schedule/today (an empty days_of_week means every day), using the browser's day.
+  const todayDow = new Date().getDay();
+  const todaySchedule = schedules?.filter(s => s.days_of_week.length === 0 || s.days_of_week.includes(todayDow)) ?? null;
+  const popularShown = (isLoggedIn ? popular.filter(g => !trackedIds.has(g.id)) : popular).slice(0, 10);
 
   return (
     <>
@@ -161,10 +188,17 @@ export default function HomePage() {
           - loading         → skeleton (reserves height, prevents CLS)
           - anon, no games  → MarketingHero
           - anon, has games → GamesTray (anon localStorage games)
-          - auth, no games  → EmptyDashboard
-          - auth, has games → GamesTray */}
+          - auth            → StatusRow + (GamesTray + TodayPlan | EmptyDashboard) + SetupChecklist */}
       {loading ? (
         <div className="mx-auto max-w-6xl px-4 pt-8 pb-2" style={{ minHeight: 220 }}>
+          {/* Status row (signed-in only) */}
+          {token && (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3" style={{ marginBottom: 28 }}>
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="animate-pulse" style={{ height: 118, borderRadius: 12, background: 'var(--surface)' }} />
+              ))}
+            </div>
+          )}
           {/* Progress bar row */}
           <div style={{ marginBottom: 24 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
@@ -189,23 +223,26 @@ export default function HomePage() {
             ))}
           </div>
         </div>
+      ) : isLoggedIn ? (
+        <div className="mx-auto max-w-6xl px-4 pt-8 pb-2">
+          <StatusRow games={myGames} streak={streak} streakBest={streakBest} />
+          {hasGames ? <GamesTray games={myGames} onToggle={handleToggle} hideProgress /> : <EmptyDashboard />}
+          {hasGames && <TodayPlan schedules={todaySchedule} hasAnySchedule={!!schedules?.length} />}
+          <SetupChecklist token={token} hasSchedule={schedules === null ? null : schedules.length > 0} />
+        </div>
       ) : hasGames ? (
         <div className="mx-auto max-w-6xl px-4 pt-8 pb-2">
           <GamesTray games={myGames} onToggle={handleToggle} />
-        </div>
-      ) : isLoggedIn ? (
-        <div className="mx-auto max-w-6xl px-4 pt-8 pb-2">
-          <EmptyDashboard />
         </div>
       ) : (
         <MarketingHero />
       )}
 
       {/* Popular games */}
-      {popular.length > 0 && (
+      {popularShown.length > 0 && (
         <div className="mx-auto max-w-6xl px-4 py-10">
           <PopularGames
-            games={popular}
+            games={popularShown}
             context={popContext}
             trackedIds={trackedIds}
             onAdd={handleAddPopular}
@@ -213,10 +250,12 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* Features / about section */}
-      <div className="mx-auto max-w-6xl px-4 pb-16">
-        <FeaturesSection />
-      </div>
+      {/* Features / about section: it's a sign-up pitch, so signed-in users skip it */}
+      {!isLoggedIn && !authLoading && (
+        <div className="mx-auto max-w-6xl px-4 pb-16">
+          <FeaturesSection />
+        </div>
+      )}
     </>
   );
 }

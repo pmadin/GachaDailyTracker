@@ -6,6 +6,7 @@ import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from 
 import type { DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
 import { useAuth } from '../_context/AuthContext';
+import { hasBrowserPushSubscription } from '../_lib/push';
 import {
   fetchTrackerGames,
   removeTrackerGame,
@@ -132,13 +133,7 @@ export default function DashboardPage() {
     fetchNotificationPrefs(token)
       .then(async p => {
         if (!p.enabled) { setNotifEnabled(false); return; }
-        try {
-          const reg = await navigator.serviceWorker.getRegistration('/');
-          const sub = reg ? await reg.pushManager.getSubscription() : null;
-          setNotifEnabled(!!sub);
-        } catch {
-          setNotifEnabled(false);
-        }
+        setNotifEnabled(await hasBrowserPushSubscription());
       })
       .catch(() => {});
   }, [token]);
