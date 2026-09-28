@@ -10,7 +10,7 @@
  * Local: npm run check:schema (built) or npm run check:schema:ts (reads .env).
  *
  * Uses its own pg Pool instead of src/config/database.ts on purpose: that module logs every
- * query and prints DATABASE_URL on connection errors, which would land in the release log.
+ * query and exits the process on its own connection test, which would muddy the release log.
  */
 import fs from 'fs';
 import path from 'path';

@@ -38,7 +38,7 @@ The live DB is Heroku Postgres and it is **not** migrated automatically. Every s
 
 Other rules:
 - Never test writes against prod. `npm run dev` points at live data; use `npm run local` (Docker) with a restored, scrubbed copy.
-- Backups: Heroku keeps 7 daily + 1 weekly scheduled backups and the last 5 manual ones on `essential-0` (each ~110 KB, stored by Heroku). `npm run backup:pull` downloads a fresh one into gitignored `backups/`; run it weekly and before any risky DB work.
+- Backups: a daily schedule runs at 04:00 America/Los_Angeles (`heroku pg:backups:schedules -a gachadailytracker`, set 2026-09-28). Heroku keeps 7 daily + 1 weekly scheduled backups and the last 5 manual ones on `essential-0` (each ~110 KB, stored by Heroku). `npm run backup:pull` downloads a fresh one into gitignored `backups/`; run it weekly and before any risky DB work.
 - Heroku release numbers (`v59`, `v62`, …) are just Heroku's deploy/config counter, not the app's V4/V5 version.
 - **Why this exists:** in Sep 2026 `users.streak_best` shipped in code (Heroku release v59) without its migration. For ~4 days every streak update and `/auth/profile` returned 500, the nightly audit reset everyone to 0, and the leaderboard went empty. Streaks were rebuilt from a Sep 21 local dump plus `daily_completions`. CI didn't catch it because it builds a fresh DB from the schema file; `checkSchema` closes that gap.
 

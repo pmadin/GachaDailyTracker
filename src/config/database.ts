@@ -6,6 +6,17 @@ import path from 'path';
 dotenv.config({ path: path.join(__dirname, '../../.env.local') });
 dotenv.config({ path: path.join(__dirname, '../../.env') });
 
+/** "host:port/dbname" without user or password, safe to log. */
+function describeDbTarget(url: string | undefined): string {
+    if (!url) return '(not set)';
+    try {
+        const u = new URL(url);
+        return `${u.hostname}${u.port ? ':' + u.port : ''}${u.pathname}`;
+    } catch {
+        return '(unparseable URL)';
+    }
+}
+
 class Database {
     private pool: Pool;
 
@@ -50,7 +61,8 @@ class Database {
             } else {
                 console.error('❌ Database connection failed:', error);
             }
-            console.error('💡 DATABASE_URL:', process.env.DATABASE_URL);
+            // Host and database name only: the full URL carries the password and would end up in the Heroku logs.
+            console.error('💡 DATABASE_URL target:', describeDbTarget(process.env.DATABASE_URL));
             console.error('💡 If SSL error, try adding ?sslmode=disable to DATABASE_URL');
             process.exit(1);
         }
