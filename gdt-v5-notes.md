@@ -140,6 +140,17 @@ From a closed GitHub issue: WuWa has a mode that gives 160 Astrite and resets we
 
 **Per-page kintsugi backgrounds.** ✅ The generator itself is done. What's left: give login, register, forgot-password, reset-password and 404 their own generated SVGs, since they all share `kintsugi-veins-login-reg.svg` right now. A Web Worker to keep slider drags smooth is optional.
 
+**Popular Games: count anon users, weighted.** Right now only accounts move the chart. `/games/popular` ranks by `games.add_count`, which only goes up on the logged-in add routes (`POST /tracker/games/:id` and `/bulk` in `src/routes/tracker/tracker.ts`). Anon adds stay in localStorage, and only reach the chart if that person later registers and their list gets bulk-synced. `add_count` also never goes down: removing a game or deleting an account doesn't subtract, so it's lifetime adds rather than current popularity. With a small user base, a few accounts adding and removing games reshuffled the top 10 a lot within about two months.
+
+Plan: a weighted score that mixes both groups.
+- **Accounts:** rank by how many users track the game right now (`COUNT(*)` from `user_games`) instead of the lifetime `add_count`, so removals and deleted accounts drop out.
+- **Anon:** new `games.anon_add_count` column, bumped by a public endpoint (e.g. `POST /games/:id/anon-add`) when an anon user adds a game. One count per game per browser (localStorage flag) and a per-IP rate limit, since anyone can call an endpoint that has no login. Removing the game in the browser could call a matching decrement.
+- **Score:** something like `current_trackers + 0.5 × anon_add_count`, with the anon weight stored in `site_settings` so an admin can tune it or set it to 0 if it gets gamed.
+- Count each person only once: a registering anon user's bulk sync already counts them as an account, so it shouldn't also keep their anon count. Accept a small overlap or decrement on sync.
+- Keep `add_count` for the analytics panel's history.
+
+Open questions: starting weight? Does anon decrement on remove, or count adds only? Show the account/anon breakdown in admin analytics?
+
 **IP geolocation.** Low priority. `getTimezoneFromIP()` in `src/services/timezoneService.ts` is still a stub returning `America/Los_Angeles`. Real users send their browser timezone at signup, so only raw API calls hit it. Free options if it's ever needed: `ipapi.co`, `ip-api.com`, `ipinfo.io`.
 
 ---
@@ -168,3 +179,4 @@ Replaces the old "badge mascot per tier" idea. The polyhedra stay as the badge a
 - NSFW policy for submitted games
 - Weekly resets: one box per game or named weeklies?
 - Is anon push worth the backend work?
+- Popular Games: anon weight, and whether to rank by current trackers
