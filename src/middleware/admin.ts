@@ -44,7 +44,7 @@ export const requireAdmin = async (req: Request, res: Response, next: NextFuncti
 
         // 3. CRITICAL: Double-check role in database for security
         const userResult = await database.query(
-            'SELECT id, username, email, role FROM users WHERE id = $1',
+            'SELECT id, username, email, role, email_verified FROM users WHERE id = $1',
             [decoded.userId]
         );
 
@@ -67,6 +67,15 @@ export const requireAdmin = async (req: Request, res: Response, next: NextFuncti
         }
 
         // 5. Attach user info to request from DB
+        // Admin tools can change games, roles and site settings, so an admin account must
+        // have a confirmed email before any of it works, even if it was promoted earlier.
+        if (!user.email_verified) {
+            return res.status(403).json({
+                error: 'Verify your email before using admin tools.',
+                code: 'email_unverified'
+            });
+        }
+
         req.user = {
             userId: user.id,
             email: user.email,

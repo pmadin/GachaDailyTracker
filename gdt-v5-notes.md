@@ -39,29 +39,42 @@ Last V4 commit: `30ee1c5` (2026-05-22). Everything after that counts as V5.
 - ✅ Stopped logging the full `DATABASE_URL` on connection errors (`746eb4b`)
 - ✅ Clearer error for Brave's disabled push service, spam-folder note on the reset email (`6f1ffa3`)
 
+**Accounts & security**
+- ✅ Email verification with OTP codes, fake-domain blocking, 7-day cleanup of unverified signups, and verified-only admin/submissions/scheduler/digest/badges (see Pillar 1)
+- ✅ Closed the `/gdt/update/*` hole that let any logged-in user edit or delete games
+
 ---
 
-## 2. Pillar 1: Email verification (Resend OTP)
+## 2. Pillar 1: Email verification ✅
 
-Started when someone registered with `nogid52036@dosbee.com`, a known disposable domain. Verification won't stop every temp email, but it adds a real step at signup and confirms the address works for reset emails and the digest.
+Started when someone registered with `nogid52036@dosbee.com`, a known disposable domain. Built in October 2026.
 
-**Proposed shape (not built yet):**
-- **OTP code instead of a magic link.** The user stays on the register page and types a 6-digit code. No deep-link handling, and it works when their mail app opens on another device.
-- **Flow:** register, account is created with `email_verified = false`, code is emailed through Resend, user submits it to `POST /auth/verify-email`, done.
-- **Reuse what's there:** Resend is already set up and sending (`src/routes/auth/passwordReset.ts`, `src/workers/emailDigestCron.ts`), and `src/workers/emailTemplate.ts` has the email styling. The verified sending domain already exists, so setup is mostly new code, not new config.
-- **Schema** (Heroku migration first, see CLAUDE.md):
-  - `users.email_verified BOOLEAN NOT NULL DEFAULT false`, plus `UPDATE users SET email_verified = true` to grandfather existing accounts
-  - `email_verification_codes` table: `user_id`, `code_hash`, `expires_at` (~10 min), `attempts`, `created_at`
-- **Safety:** store a hash of the code, not the code. Cap wrong attempts (~5), add a resend cooldown (~60 s).
-- **Register proxy:** `frontend/app/api/register/route.ts` auto-logs-in and syncs anon games right after signup. Simplest option is to keep that, show a "verify your email" banner, and gate the extras (leaderboard, email digest, push) until verified.
-- **Email change:** `src/routes/auth/emailUpdate.ts` should reset `email_verified` and send a fresh code.
-- **Resend limits:** free tier is 100 emails/day and 3,000/month. Check that's comfortable next to the digest volume.
-- **Cleanup cron (complement):** delete accounts still unverified after N days with zero games. Domain blocklists stay optional; they're a cat-and-mouse game.
+**Signup and verification**
+- ✅ 6-digit code emailed through Resend at signup. The register page switches to a code screen ("Skip for now" allowed), and `/verify-email` handles it later.
+- ✅ Codes are hashed (HMAC with the pepper), expire in 10 minutes, die after 5 wrong tries, and can be resent once every 60 seconds.
+- ✅ Changing your email resets verification and sends a code to the new address.
+- ✅ Existing accounts were grandfathered as verified by the migration.
+- ✅ Without `RESEND_API_KEY` (local Docker), the code is printed in the backend log instead.
 
-**Open questions**
-- Gate login, or let them in and gate only features?
-- Code length and expiry?
-- Grandfather existing accounts, or ask them to verify too?
+**Stopping fake addresses**
+- ✅ MX check at signup and email change: domains that don't exist, have no mail server, or have broken mail DNS (like a parked `nut.com`) are refused before an account is created. Temp-mail services with real mail servers still pass; verification is the gate for those. `SKIP_EMAIL_DOMAIN_CHECK=true` turns it off in CI.
+- ✅ New signups that don't verify within 7 days are auto-deleted by an hourly job (`users.email_verify_deadline`). Never applies to grandfathered accounts, admins, or existing users who changed their email.
+
+**What unverified accounts can't do**
+- ✅ Admin tools: every admin route refuses, and the admin area shows a lock screen. An unverified user can't be promoted to Admin/Owner.
+- ✅ Game submissions and the play scheduler.
+- ✅ Daily email digest (can't be turned on, and the cron skips them).
+- ✅ Streak badges stay locked. Streaks still count, and earned badges unlock the moment they verify.
+
+**UI**
+- ✅ Banner under the navbar with the deletion date, and a "limited banner" countdown card on `/profile` (days/hrs/min/sec, red in the last 24 hours).
+
+**Security fix found along the way:** `/gdt/update/*` (edit, add, delete games) only checked for a login, so any account could change the catalog. It now requires a verified admin.
+
+**Email setup follow-ups (DNS, no code)**
+- Add a DMARC record (Cloudflare → Email → DMARC Management, or TXT `_dmarc` = `v=DMARC1; p=none;`), move to `p=quarantine` after a couple of clean weeks.
+- Replace `noreply@` with a real address (`hello@`) through Cloudflare Email Routing and `RESEND_FROM_EMAIL` on Heroku.
+- Optional later: send from a subdomain (`mail.gachadailytracker.com`) to isolate reputation.
 
 ---
 
@@ -78,6 +91,7 @@ Badges unlock correctly today, but nothing tells the user. `POST /tracker/streak
 - Trigger from the dashboard `handleToggleComplete` and home `handleToggle`, alongside the existing confetti.
 - Dedupe per tier in localStorage (same idea as `gdt_confetti_date`) so a refresh doesn't replay it.
 - **Anon users:** skipped. No badges for anon, they're the simple-tracking tier.
+- **Unverified accounts:** skipped too. Their badges are locked until they verify, so the reveal should fire on verification instead (or the next time they unlock a tier).
 
 ---
 
@@ -174,7 +188,6 @@ Replaces the old "badge mascot per tier" idea. The polyhedra stay as the badge a
 
 ## 9. Open questions
 
-- Email verification: gate login, or only features?
 - Custom icon storage: DB or repo?
 - NSFW policy for submitted games
 - Weekly resets: one box per game or named weeklies?

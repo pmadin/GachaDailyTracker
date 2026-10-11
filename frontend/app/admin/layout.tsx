@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '../_context/AuthContext';
+import VerifyEmailGate from '../_components/VerifyEmailGate';
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -17,6 +18,18 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   }, [isLoading, user, router]);
 
   if (isLoading || !user || user.role < 3) return null;
+
+  // Every admin API refuses unverified accounts too; this just explains it up front.
+  if (user.email_verified === false) {
+    return (
+      <div className="mx-auto max-w-7xl px-4 py-16">
+        <VerifyEmailGate
+          title="Admin tools are locked"
+          message="Admin accounts need a verified email before any admin tool works. Confirm your email to unlock games, users, submissions and settings."
+        />
+      </div>
+    );
+  }
 
   const navLink = (href: string, label: string) => {
     const active = pathname === href;

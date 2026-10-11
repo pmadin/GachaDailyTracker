@@ -262,3 +262,22 @@ body {
   28%  { opacity: 1; transform: scale(1) rotate(45deg); }
   100% { opacity: 0; transform: scale(0.2) rotate(90deg); }
 }
+
+/* ── Account-deletion "limited banner" card on /profile (unverified accounts) ── */
+@keyframes deletion-banner-sheen {
+  0%, 55% { transform: translateX(-120%) skewX(-20deg); }
+  100%    { transform: translateX(320%) skewX(-20deg); }
+}
+.deletion-banner { position: relative; overflow: hidden; }
+.deletion-banner::after {
+  content: '';
+  position: absolute;
+  inset: -20% auto -20% 0;
+  width: 30%;
+  background: linear-gradient(90deg, transparent, rgba(232,200,106,0.10), transparent);
+  animation: deletion-banner-sheen 5s ease-in-out infinite;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .deletion-banner::after { animation: none; display: none; }
+}

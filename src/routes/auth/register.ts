@@ -4,6 +4,8 @@ import validator from 'validator';
 import database from '../../config/database';
 import TimezoneService from '../../services/timezoneService';
 import { addPepper } from '../../utils/crypto';
+import { issueVerificationCode, UNVERIFIED_ACCOUNT_TTL_DAYS } from '../../services/emailVerificationService';
+import { emailDomainCanReceiveMail } from '../../utils/emailDomain';
 
 const registerRouter: Router = express.Router();
 
@@ -79,6 +81,14 @@ registerRouter.post('/register', async (req: Request, res: Response) => {
         if (!validator.isEmail(email)) {
             return res.status(400).json({
                 error: 'Please enter a valid email address'
+            });
+        }
+
+        // Stops made-up domains (name@random-word.com) before an account is created
+        if (!(await emailDomainCanReceiveMail(email))) {
+            return res.status(400).json({
+                error: "That email domain can't receive mail. Check for a typo, or use a different address.",
+                code: 'email_domain_no_mail'
             });
         }
 
@@ -160,14 +170,22 @@ registerRouter.post('/register', async (req: Request, res: Response) => {
         const passwordHash = await bcrypt.hash(pepperedPassword, saltRounds);
 
         const result = await database.query(`
-            INSERT INTO users (username, email, password_hash, timezone, role)
-            VALUES ($1, $2, $3, $4, 1)
-            RETURNING id, username, email, timezone, role, created_at
-        `, [username, email, passwordHash, userTimezone]);
+            INSERT INTO users (username, email, password_hash, timezone, role, email_verified, email_verify_deadline)
+            VALUES ($1, $2, $3, $4, 1, false, CURRENT_TIMESTAMP + make_interval(days => $5))
+            RETURNING id, username, email, timezone, role, created_at, email_verified, email_verify_deadline
+        `, [username, email, passwordHash, userTimezone, UNVERIFIED_ACCOUNT_TTL_DAYS]);
 
         const user = result.rows[0];
 
         console.log('User registered successfully');
+
+        // The account exists either way; a failed send just means the user hits "resend".
+        let verificationSent = false;
+        try {
+            verificationSent = await issueVerificationCode(user);
+        } catch (err) {
+            console.error('Verification code issue failed:', err instanceof Error ? err.message : err);
+        }
 
         res.status(201).json({
             message: 'User created successfully',
@@ -178,8 +196,11 @@ registerRouter.post('/register', async (req: Request, res: Response) => {
                 timezone: user.timezone,
                 role: user.role,
                 created_at: user.created_at,
+                email_verified: user.email_verified,
+                email_verify_deadline: user.email_verify_deadline,
                 detected_timezone: wasDetected
             },
+            verification_sent: verificationSent,
             security_info: {
                 hash_algorithm: 'bcrypt',
                 salt_rounds: saltRounds,

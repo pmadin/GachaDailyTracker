@@ -19,10 +19,12 @@ import leaderboardRouter from './routes/leaderboard';
 import adminSettingsRouter from './routes/admin/settings';
 import analyticsRouter from './routes/admin/analytics';
 import { authenticateToken } from './middleware/auth';
+import { requireVerifiedEmail } from './middleware/verified';
 import { initWebPush } from './config/webpush';
 import { startNotificationCron } from './workers/notificationCron';
 import { startStreakAuditCron } from './workers/streakAuditCron';
 import { startEmailDigestCron } from './workers/emailDigestCron';
+import { startUnverifiedCleanupCron } from './workers/unverifiedCleanupCron';
 import passwordResetRouter from './routes/auth/passwordReset';
 import scheduleRouter from './routes/schedule';
 
@@ -147,12 +149,12 @@ app.use('/gdt/admin', adminGamesRouter);
 app.use('/gdt/update', updateRouter);
 app.use('/gdt/tracker', trackerRouter);
 app.use('/gdt/notifications', notificationsRouter);
-app.use('/gdt/submissions', authenticateToken, submissionsRouter);
+app.use('/gdt/submissions', authenticateToken, requireVerifiedEmail, submissionsRouter);
 app.use('/gdt/admin', adminSubmissionsRouter);
 app.use('/gdt/leaderboard', leaderboardRouter);
 app.use('/gdt/admin', adminSettingsRouter);
 app.use('/gdt/admin', analyticsRouter);
-app.use('/gdt/schedule', authenticateToken, scheduleRouter);
+app.use('/gdt/schedule', authenticateToken, requireVerifiedEmail, scheduleRouter);
 
 /**
  * @swagger
@@ -452,6 +454,7 @@ async function initializeApp() {
         startNotificationCron();
         startStreakAuditCron();
         startEmailDigestCron();
+        startUnverifiedCleanupCron();
 
         // Start server
         app.listen(PORT, () => {

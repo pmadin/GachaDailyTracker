@@ -38,7 +38,9 @@ import type { DashboardGame } from '../_components/DashboardCard';
 import { getNextResetMs } from '../_lib/countdown';
 
 export default function DashboardPage() {
-  const { token, isLoading: authLoading } = useAuth();
+  const { token, user, isLoading: authLoading } = useAuth();
+  // The play scheduler needs a verified email, so unverified users don't get the schedule button.
+  const canSchedule = !!token && user?.email_verified !== false;
   const [games, setGames] = useState<DashboardGame[]>([]);
   const [loading, setLoading] = useState(true);
   const [confirmClear, setConfirmClear] = useState(false);
@@ -111,7 +113,7 @@ export default function DashboardPage() {
   }, [token]);
 
   useEffect(() => {
-    if (!token) return;
+    if (!token || !canSchedule) return;
     fetchSchedules(token)
       .then(r => {
         const map = new Map<number, ScheduleFormData>();
@@ -126,7 +128,7 @@ export default function DashboardPage() {
         setScheduleMap(map);
       })
       .catch(() => {});
-  }, [token]);
+  }, [token, canSchedule]);
 
   useEffect(() => {
     if (!token) return;
@@ -448,7 +450,7 @@ export default function DashboardPage() {
                       onToggleComplete={handleToggleComplete}
                       onRemove={handleRemove}
                       onUpdateOffset={notifEnabled ? handleUpdateOffset : undefined}
-                      onSchedule={token ? handleSchedule : undefined}
+                      onSchedule={canSchedule ? handleSchedule : undefined}
                       hasSchedule={scheduleMap.has(game.game_id)}
                       hookNotificationsActive={scheduleMap.get(game.game_id)?.hook_notifications === true}
                     />
@@ -465,7 +467,7 @@ export default function DashboardPage() {
                   onToggleComplete={handleToggleComplete}
                   onRemove={handleRemove}
                   onUpdateOffset={notifEnabled ? handleUpdateOffset : undefined}
-                  onSchedule={token ? handleSchedule : undefined}
+                  onSchedule={canSchedule ? handleSchedule : undefined}
                   hasSchedule={scheduleMap.has(game.game_id)}
                   hookNotificationsActive={scheduleMap.get(game.game_id)?.hook_notifications === true}
                 />

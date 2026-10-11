@@ -34,6 +34,7 @@ const DIGEST_QUERY = `
       END
     )
   WHERE u.email_digest_enabled = true
+    AND u.email_verified = true
     AND EXTRACT(HOUR FROM CURRENT_TIMESTAMP AT TIME ZONE u.timezone) = u.email_digest_hour
   GROUP BY u.id, u.email, u.username, u.timezone, u.email_digest_hour
 `;
@@ -91,6 +92,12 @@ export function startEmailDigestCron(): void {
       );
       if ((result.rowCount ?? 0) > 0) {
         console.log(`Cleaned up ${result.rowCount} expired password reset tokens`);
+      }
+      const codes = await database.query(
+        `DELETE FROM email_verification_codes WHERE expires_at < CURRENT_TIMESTAMP`
+      );
+      if ((codes.rowCount ?? 0) > 0) {
+        console.log(`Cleaned up ${codes.rowCount} expired email verification codes`);
       }
     } catch (error) {
       console.error('Token cleanup error:', error);

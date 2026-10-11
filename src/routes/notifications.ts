@@ -321,12 +321,13 @@ notificationsRouter.get('/email-preferences', async (req, res) => {
   const { userId } = req.user!;
   try {
     const result = await database.query(
-      `SELECT email_digest_enabled, email_digest_hour FROM users WHERE id = $1`,
+      `SELECT email_digest_enabled, email_digest_hour, email_verified FROM users WHERE id = $1`,
       [userId]
     );
     res.json({
       email_digest_enabled: result.rows[0].email_digest_enabled,
       email_digest_hour:    result.rows[0].email_digest_hour,
+      email_verified:       result.rows[0].email_verified,
     });
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : 'Unknown error';
@@ -344,6 +345,24 @@ notificationsRouter.patch('/email-preferences', async (req, res) => {
   const updates: string[] = [];
   const values: unknown[] = [];
   let idx = 1;
+
+  // The digest only ever goes to a confirmed address (the cron also filters on this).
+  // Turning it off is always allowed.
+  if (email_digest_enabled === true) {
+    try {
+      const v = await database.query('SELECT email_verified FROM users WHERE id = $1', [userId]);
+      if (!v.rows[0]?.email_verified) {
+        return res.status(403).json({
+          error: 'Verify your email before turning on the daily digest.',
+          code: 'email_unverified',
+        });
+      }
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Error checking email verification:', msg);
+      return res.status(500).json({ error: 'Failed to update email preferences' });
+    }
+  }
 
   if (email_digest_enabled !== undefined) {
     updates.push(`email_digest_enabled = $${idx++}`);

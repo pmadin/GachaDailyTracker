@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useSyncExternalStore, FormEvent } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '../_context/AuthContext';
 import { hasBrowserPushSubscription } from '../_lib/push';
@@ -22,6 +23,7 @@ import {
 } from '../_lib/api';
 import { STREAK_TIERS, streakProgress } from '../_lib/badges';
 import PolyhedronBadge from '../_components/PolyhedronBadge';
+import DeletionBannerCard from '../_components/DeletionBannerCard';
 
 const TIMEZONE_OPTIONS = [
   // Popular
@@ -187,10 +189,15 @@ export default function ProfilePage() {
   // Fetched fresh on every visit, not cached on the AuthUser snapshot — streak_best changes
   // daily and AuthUser only refreshes on next login.
   const [streakInfo, setStreakInfo] = useState<ProfileStreakInfo | null>(null);
+  // Same fresh fetch also gives the live verification status (the stored AuthUser can lag).
+  const [freshVerified, setFreshVerified] = useState<boolean | null>(null);
   useEffect(() => {
     if (!token) return;
     fetchProfile(token)
-      .then(({ user: u }) => setStreakInfo({ streak_count: u.streak_count, streak_best: u.streak_best }))
+      .then(({ user: u }) => {
+        setStreakInfo({ streak_count: u.streak_count, streak_best: u.streak_best });
+        if (typeof u.email_verified === 'boolean') setFreshVerified(u.email_verified);
+      })
       .catch(() => {});
   }, [token]);
 
@@ -344,7 +351,11 @@ export default function ProfilePage() {
     setEmailLoading(true);
     try {
       const res = await updateEmail(token!, newEmail, emailPw);
-      login(token!, { ...user!, email: res.user.email });
+      login(token!, { ...user!, email: res.user.email, email_verified: res.user.email_verified });
+      if (res.user.email_verified === false) {
+        router.push('/verify-email');
+        return;
+      }
       setEmailSuccess('Email updated successfully.');
       setNewEmail('');
       setEmailPw('');
@@ -420,6 +431,10 @@ export default function ProfilePage() {
   };
 
   const roleLabel = ROLE_LABELS[user.role] ?? 'User';
+  // Unverified accounts keep earning streaks, but badges and the email digest stay locked
+  // until the address is confirmed.
+  const emailUnverified = (freshVerified ?? user.email_verified) === false;
+  const digestOn = emailDigestEnabled && !emailUnverified;
 
   const timezoneDropdownOptions = user?.timezone &&
     !TIMEZONE_OPTIONS.find(t => t.timezone === user.timezone)
@@ -437,6 +452,11 @@ export default function ProfilePage() {
     <div className="mx-auto max-w-lg px-4 py-12">
       <h1 className="mb-8 text-2xl font-bold text-white">Profile</h1>
 
+      {/* Unverified new signup: countdown to auto-deletion (replaces the top strip here) */}
+      {emailUnverified && user.email_verify_deadline && (
+        <DeletionBannerCard deadline={user.email_verify_deadline} />
+      )}
+
       {/* Account info */}
       <div className="kintsugi-card no-veins mb-6 rounded-xl p-6 space-y-4" style={{ border: '1px solid rgba(200,155,60,0.12)', background: 'var(--bg2)' }}>
         <div className="flex items-center justify-between">
@@ -445,7 +465,18 @@ export default function ProfilePage() {
         </div>
         <div className="flex items-center justify-between">
           <span className="text-sm text-zinc-500">Email</span>
-          <span className="text-sm text-zinc-300">{user.email}</span>
+          <span className="flex items-center gap-2 text-sm text-zinc-300">
+            {user.email}
+            {emailUnverified && (
+              <Link
+                href="/verify-email"
+                className="rounded-full px-2 py-0.5 text-xs font-medium"
+                style={{ border: '1px solid var(--border2)', color: 'var(--gold-bright)' }}
+              >
+                Verify
+              </Link>
+            )}
+          </span>
         </div>
         <div className="flex items-center justify-between">
           <span className="text-sm text-zinc-500">Role</span>
@@ -518,19 +549,27 @@ export default function ProfilePage() {
                     day{best === 1 ? '' : 's'}
                   </span>
                 </p>
-                <p className="mt-3 text-xs" style={{ color: bestTier ? 'var(--gold-bright)' : 'var(--text3)' }}>
-                  {bestTier ? `${bestTier.label} tier` : 'No badge yet'}
+                <p className="mt-3 text-xs" style={{ color: bestTier && !emailUnverified ? 'var(--gold-bright)' : 'var(--text3)' }}>
+                  {!bestTier ? 'No badge yet' : emailUnverified ? `${bestTier.label} tier (locked)` : `${bestTier.label} tier`}
                 </p>
               </div>
             </div>
           );
         })()}
-        <p className="mb-4 text-xs" style={{ color: 'var(--text3)' }}>
-          Earned at your best-ever streak — kept forever, even if the streak later breaks.
-        </p>
+        {emailUnverified ? (
+          <p className="mb-4 text-xs" style={{ color: 'var(--text2)' }}>
+            Your streak still counts, but badges stay locked until you{' '}
+            <Link href="/verify-email" style={{ color: 'var(--gold-bright)' }}>verify your email</Link>.
+            Anything you&apos;ve earned unlocks right away once you do.
+          </p>
+        ) : (
+          <p className="mb-4 text-xs" style={{ color: 'var(--text3)' }}>
+            Earned at your best-ever streak — kept forever, even if the streak later breaks.
+          </p>
+        )}
         <div className="grid grid-cols-3 gap-4 sm:grid-cols-6">
           {STREAK_TIERS.map(tier => {
-            const earned = streakInfo != null && streakInfo.streak_best >= tier.days;
+            const earned = !emailUnverified && streakInfo != null && streakInfo.streak_best >= tier.days;
             return (
               <div key={tier.key} className="flex flex-col items-center gap-1.5">
                 <PolyhedronBadge tier={tier} locked={!earned} size={44} />
@@ -776,24 +815,30 @@ export default function ProfilePage() {
             <p className="mt-0.5 text-sm text-zinc-500">
               Get a daily summary of your upcoming game resets.
             </p>
+            {emailUnverified && (
+              <p className="mt-1 text-xs" style={{ color: 'var(--text2)' }}>
+                <Link href="/verify-email" style={{ color: 'var(--gold-bright)' }}>Verify your email</Link>
+                {' '}to turn this on.
+              </p>
+            )}
           </div>
           {/* Toggle switch */}
           <button
-            onClick={() => handleEmailToggle(!emailDigestEnabled)}
-            disabled={emailSaving}
-            aria-checked={emailDigestEnabled}
+            onClick={() => handleEmailToggle(!digestOn)}
+            disabled={emailSaving || emailUnverified}
+            aria-checked={digestOn}
             role="switch"
-            className="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer items-center rounded-full transition-colors duration-200 disabled:opacity-50"
-            style={{ background: emailDigestEnabled ? 'linear-gradient(135deg, #c8913c, #e8c86a)' : '#3f3f46' }}
+            className="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer items-center rounded-full transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-50"
+            style={{ background: digestOn ? 'linear-gradient(135deg, #c8913c, #e8c86a)' : '#3f3f46' }}
           >
             <span
               className="pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transition-transform duration-200"
-              style={{ transform: emailDigestEnabled ? 'translateX(1.375rem)' : 'translateX(0.25rem)' }}
+              style={{ transform: digestOn ? 'translateX(1.375rem)' : 'translateX(0.25rem)' }}
             />
           </button>
         </div>
 
-        {emailDigestEnabled && (
+        {digestOn && (
           <div className="border-t pt-4" style={{ borderColor: 'rgba(200,155,60,0.12)' }}>
             <label className="block text-sm text-zinc-400 mb-2">
               Send digest at (your local time)

@@ -1,7 +1,9 @@
 'use client';
 
 import { useState, useEffect, FormEvent } from 'react';
+import Link from 'next/link';
 import { fetchTimezones, submitGame, type TimezoneEntry } from '../_lib/api';
+import { useAuth } from '../_context/AuthContext';
 
 interface Props {
   token: string;
@@ -9,6 +11,8 @@ interface Props {
 }
 
 export default function SubmitGameModal({ token, onClose }: Props) {
+  const { user } = useAuth();
+  const emailUnverified = user?.email_verified === false;
   const [timezones, setTimezones] = useState<Record<string, TimezoneEntry[]>>({});
   const [form, setForm] = useState({
     name: '',
@@ -63,7 +67,29 @@ export default function SubmitGameModal({ token, onClose }: Props) {
       >
         <h2 className="mb-5 text-base font-semibold text-white">Submit a Game for Review</h2>
 
-        {success ? (
+        {emailUnverified ? (
+          <div className="space-y-4">
+            <p className="text-sm" style={{ color: 'var(--text2)' }}>
+              Game suggestions need a verified email so we can follow up if something about the game is unclear.
+            </p>
+            <div className="flex gap-2">
+              <Link
+                href="/verify-email"
+                className="flex-1 rounded-lg py-2 text-center text-sm font-medium hover:opacity-90"
+                style={{ background: 'linear-gradient(135deg, #c8913c, #e8c86a)', color: '#0a0808' }}
+              >
+                Verify email
+              </Link>
+              <button
+                onClick={onClose}
+                className="flex-1 rounded-lg border py-2 text-sm"
+                style={{ borderColor: 'rgba(200,155,60,0.20)', color: 'var(--text2)' }}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        ) : success ? (
           <div className="space-y-4">
             <p className="rounded-lg bg-emerald-950/60 px-4 py-3 text-sm text-emerald-400">
               {success}

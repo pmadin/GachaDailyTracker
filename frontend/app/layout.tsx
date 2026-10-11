@@ -3,6 +3,7 @@ import { Geist, Plus_Jakarta_Sans, JetBrains_Mono, Noto_Sans_JP } from 'next/fon
 import './globals.css';
 import { AuthProvider } from './_context/AuthContext';
 import Navbar from './_components/Navbar';
+import VerifyEmailBanner from './_components/VerifyEmailBanner';
 import Footer from './_components/Footer';
 import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
@@ -26,6 +27,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="flex min-h-full flex-col antialiased">
         <AuthProvider>
           <Navbar />
+          <VerifyEmailBanner />
           <main className="flex-1">{children}</main>
           <Footer />
         </AuthProvider>
