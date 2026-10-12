@@ -29,6 +29,12 @@ CREATE TABLE users (
     email_digest_enabled BOOLEAN  NOT NULL DEFAULT false,
     email_digest_hour    SMALLINT NOT NULL DEFAULT 8,
 
+    -- Email ownership confirmed with a one-time code (accounts from before V5 were grandfathered in)
+    email_verified BOOLEAN NOT NULL DEFAULT false,
+    -- Set only at signup: an account still unverified after this is auto-deleted.
+    -- NULL = never auto-deleted (verified, grandfathered, or unverified after an email change).
+    email_verify_deadline TIMESTAMP,
+
     created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -121,6 +127,16 @@ CREATE TABLE password_reset_tokens (
     created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- One-time email verification codes (6 digits, hashed, ~10 min expiry, one live code per user)
+CREATE TABLE email_verification_codes (
+    id          SERIAL PRIMARY KEY,
+    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    code_hash   VARCHAR(64) NOT NULL,
+    expires_at  TIMESTAMP NOT NULL,
+    attempts    SMALLINT NOT NULL DEFAULT 0,
+    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Play schedules (personal play windows per game, per user)
 CREATE TABLE play_schedules (
     id                  SERIAL PRIMARY KEY,
@@ -146,5 +162,6 @@ CREATE INDEX idx_submissions_submitted_by ON game_submissions(submitted_by);
 CREATE INDEX IF NOT EXISTS idx_users_streak ON users(streak_count DESC) WHERE streak_count > 0;
 CREATE INDEX idx_reset_tokens_token       ON password_reset_tokens(token);
 CREATE INDEX idx_reset_tokens_user_id     ON password_reset_tokens(user_id);
+CREATE INDEX idx_email_codes_user_id      ON email_verification_codes(user_id);
 CREATE INDEX idx_play_schedules_user_id   ON play_schedules(user_id);
 CREATE INDEX idx_play_schedules_game_id   ON play_schedules(game_id);

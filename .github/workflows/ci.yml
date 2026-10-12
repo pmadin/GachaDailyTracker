@@ -67,6 +67,10 @@ jobs:
       - name: "Unit tests: email mask"
         run: npm run test:mask
 
+      # Pure unit tests for the email-domain MX classifier (no DNS or network needed)
+      - name: "Unit tests: email domain"
+        run: npm run test:email-domain
+
       # Pure unit tests for the streak-badge tier lookup (no database or network needed)
       - name: "Unit tests: streak tiers"
         run: npm run test:streak
@@ -94,6 +98,8 @@ jobs:
           REGISTRATION_TOKEN: ${{ secrets.REGISTRATION_TOKEN }}
           GAME_DATA_SOURCE_URL: https://raw.githubusercontent.com/cicerakes/Game-Time-Master/refs/heads/master/game-data.js
           GAME_DATA_FALLBACK_PATH: ./data/game-data-backup.js
+          # Test users register with example.com addresses, which have a null MX on purpose
+          SKIP_EMAIL_DOMAIN_CHECK: 'true'
         run: node dist/index.js &
 
       # Poll the health endpoint until the API is ready (up to 30s)

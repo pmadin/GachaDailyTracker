@@ -63,7 +63,7 @@ profileRoutes.get('/profile', async (req: Request, res: Response) => {
         ) as any;
 
         const result = await database.query(
-            `SELECT id, username, email, timezone, role, created_at, streak_count, streak_best
+            `SELECT id, username, email, timezone, role, created_at, streak_count, streak_best, email_verified, email_verify_deadline
              FROM users WHERE id = $1`,
             [decoded.userId]
         );

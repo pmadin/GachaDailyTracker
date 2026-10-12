@@ -22,6 +22,7 @@ Applies to everything written for this project: UI copy, code comments, docs/not
 - Commit and push to `dev` only. `main` is a protected branch that only accepts pull requests, so never push or merge into `main` directly.
 - The GitHub CLI (`gh`) isn't installed and isn't needed. Don't offer to install it. The owner opens and merges PRs on the GitHub website.
 - After pushing to `dev`, follow up with a simple PR report the owner can paste in: a short title plus a brief description (what changed and why, and any related config/env changes that aren't in the diff). Include the compare link `https://github.com/pmadin/GachaDailyTracker/compare/main...dev`.
+- Put the PR title and description inside a fenced ` ```markdown ` code block so it copies as clean Markdown. Don't use `>` blockquotes for it: the terminal draws them as `▎` bars that get copied along and have to be deleted by hand.
 - Don't add the `🤖 Generated with [Claude Code](https://claude.com/claude-code)` line to PR descriptions. Keep them plain.
 
 ---
@@ -195,11 +196,11 @@ export const metadata: Metadata = {
 
 ## Backend — key notes
 
-**Env vars:** `DATABASE_URL`, `JWT_SECRET`, `PASSWORD_PEPPER`, `REGISTRATION_TOKEN`, `FRONTEND_URL`, `RESEND_API_KEY`, `RESEND_FROM_EMAIL`
+**Env vars:** `DATABASE_URL`, `JWT_SECRET`, `PASSWORD_PEPPER`, `REGISTRATION_TOKEN`, `FRONTEND_URL`, `RESEND_API_KEY`, `RESEND_FROM_EMAIL`, `SKIP_EMAIL_DOMAIN_CHECK` (CI only: `true` turns off the MX check at signup/email change, since test users use example.com)
 
 **Routes** (all under `/gdt`):
 - Public: `/games`, `/games/servers/list`, `/games/popular?limit=N`, `/timezones`, `/health`, `/status`
-- Auth: `/auth/register`, `/auth/login`, `/auth/profile`, `/auth/update-password`, `/auth/update-email`, `/auth/account` (DELETE), `/auth/forgot-password` (POST), `/auth/reset-password/:token` (GET), `/auth/reset-password` (POST)
+- Auth: `/auth/register`, `/auth/login`, `/auth/profile`, `/auth/update-password`, `/auth/update-email`, `/auth/account` (DELETE), `/auth/forgot-password` (POST), `/auth/reset-password/:token` (GET), `/auth/reset-password` (POST), `/auth/verify-email` (POST, JWT), `/auth/verify-email/resend` (POST, JWT)
 - Tracker (JWT): `/tracker/games` (GET — includes `streak` field), `/tracker/games/bulk` (POST), `/tracker/games/:id` (POST/DELETE), `/tracker/games/:id/complete` (POST/DELETE), `/tracker/streak` (POST — idempotent, atomic CASE update), `/tracker/order` (PUT — saves `display_order` via proper client transaction)
 - Game mgmt (JWT): `/update/games/:id`, `/update/add/game`, `/update/delete/game/:id`, `/update/games/import`
 - Submissions: `/submissions` (POST — create suggestion, JWT), `/admin/submissions` (GET — list, role 3+), `/admin/submissions/:id` (PATCH — approve/reject, role 3+)
@@ -233,7 +234,10 @@ users             — accounts, bcrypt hash, role, timezone,
                     on a missed day, streak_best never does),
                     leaderboard_hidden BOOLEAN DEFAULT FALSE,
                     email_digest_enabled BOOLEAN DEFAULT false,
-                    email_digest_hour SMALLINT DEFAULT 8
+                    email_digest_hour SMALLINT DEFAULT 8,
+                    email_verified BOOLEAN DEFAULT false (pre-V5 accounts grandfathered to true),
+                    email_verify_deadline TIMESTAMP (set only at signup, signup + 7 days; an account
+                    still unverified past it is auto-deleted hourly; NULL = never auto-deleted)
 games             — name, server, timezone, daily_reset, icon_name, is_active,
                     add_count INTEGER DEFAULT 0
 user_games        — user ↔ game join; display_order INTEGER DEFAULT 0,
@@ -241,6 +245,8 @@ user_games        — user ↔ game join; display_order INTEGER DEFAULT 0,
 daily_completions — user_id, game_id, completion_date (UNIQUE constraint)
 push_subscriptions — user_id, endpoint, p256dh, auth
 password_reset_tokens — user_id, token, expires_at, used (30-min expiry, single-use)
+email_verification_codes — user_id, code_hash (HMAC, never the raw code), expires_at (10 min),
+                    attempts (max 5); one live code per user, replaced on resend (60 s cooldown)
 site_settings     — key/value admin toggles (leaderboard_enabled)
 play_schedules    — user_id, game_id, days_of_week SMALLINT[], window_start TIME, window_end TIME,
                     hook_notifications BOOLEAN (fires push at window_start instead of reset offset)
@@ -281,6 +287,16 @@ CREATE INDEX IF NOT EXISTS idx_play_schedules_game_id ON play_schedules(game_id)
 -- v5 streak badges (run on Heroku 2026-09-27, after the outage above):
 ALTER TABLE users ADD COLUMN IF NOT EXISTS streak_best INTEGER NOT NULL DEFAULT 0;
 UPDATE users SET streak_best = streak_count WHERE streak_best < streak_count;
+
+-- v5 email verification. Adding the column with DEFAULT true marks every existing account
+-- verified (grandfathered); the second line flips the default so new signups start unverified.
+-- Safe to re-run: ADD COLUMN IF NOT EXISTS is a no-op the second time, so it never re-verifies anyone.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE users ALTER COLUMN email_verified SET DEFAULT false;
+CREATE TABLE IF NOT EXISTS email_verification_codes (id SERIAL PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, code_hash VARCHAR(64) NOT NULL, expires_at TIMESTAMP NOT NULL, attempts SMALLINT NOT NULL DEFAULT 0, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
+CREATE INDEX IF NOT EXISTS idx_email_codes_user_id ON email_verification_codes(user_id);
+-- Signups unverified past this get auto-deleted (unverifiedCleanupCron). Existing rows stay NULL = never deleted.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verify_deadline TIMESTAMP;
 ```
 
 ---

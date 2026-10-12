@@ -4,6 +4,8 @@ import jwt from 'jsonwebtoken';
 import validator from 'validator';
 import database from '../../config/database';
 import { addPepper, JWT_SECRET } from '../../utils/crypto';
+import { issueVerificationCode } from '../../services/emailVerificationService';
+import { emailDomainCanReceiveMail } from '../../utils/emailDomain';
 
 const emailRouter: Router = express.Router();
 
@@ -107,6 +109,13 @@ emailRouter.patch('/update-email', async (req: Request, res: Response) => {
             });
         }
 
+        if (!(await emailDomainCanReceiveMail(newEmail))) {
+            return res.status(400).json({
+                error: "That email domain can't receive mail. Check for a typo, or use a different address.",
+                code: 'email_domain_no_mail'
+            });
+        }
+
         // Start transaction
         await client.query('BEGIN');
 
@@ -158,9 +167,9 @@ emailRouter.patch('/update-email', async (req: Request, res: Response) => {
         // Update email
         const updateResult = await client.query(
             `UPDATE users 
-             SET email = $1, updated_at = CURRENT_TIMESTAMP 
-             WHERE id = $2 
-             RETURNING id, username, email, updated_at`,
+             SET email = $1, email_verified = false, updated_at = CURRENT_TIMESTAMP
+             WHERE id = $2
+             RETURNING id, username, email, email_verified, updated_at`,
             [newEmail, decoded.userId]
         );
 
@@ -171,14 +180,25 @@ emailRouter.patch('/update-email', async (req: Request, res: Response) => {
 
         console.log('User email updated successfully');
 
+        // A new address needs its own proof of ownership. Sent after COMMIT so a mail
+        // failure can't roll back the change; the user can resend from the banner.
+        let verificationSent = false;
+        try {
+            verificationSent = await issueVerificationCode(updatedUser);
+        } catch (err) {
+            console.error('Verification code issue failed:', err instanceof Error ? err.message : err);
+        }
+
         res.json({
             message: 'Email updated successfully',
             user: {
                 id: updatedUser.id,
                 username: updatedUser.username,
                 email: updatedUser.email,
+                email_verified: updatedUser.email_verified,
                 updated_at: updatedUser.updated_at
-            }
+            },
+            verification_sent: verificationSent
         });
 
     } catch (error: unknown) {

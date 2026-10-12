@@ -4,6 +4,7 @@ import express, { Router } from 'express';
 // POST routes (Registration & Login)
 import { registerRouter } from './register';
 import { loginRouter } from './login';
+import { verifyEmailRouter } from './verifyEmail';
 
 // GET routes - none in auth (moved to separate utilities)
 
@@ -23,6 +24,7 @@ const authRoutes: Router = express.Router();
 // POST - Account creation and authentication
 authRoutes.use(registerRouter);
 authRoutes.use(loginRouter);
+authRoutes.use(verifyEmailRouter);
 
 // PUT - Profile management (non-sensitive)
 authRoutes.use(profileRoutes);

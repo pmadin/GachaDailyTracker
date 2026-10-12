@@ -169,6 +169,52 @@ export function buildPasswordResetEmail(username: string, resetUrl: string): str
   `;
 }
 
+export function buildVerificationCodeEmail(username: string, code: string, expiresInMinutes: number): string {
+  return `
+    <!DOCTYPE html>
+    <html>
+    <body style="margin:0; padding:0; background:#09090b; font-family: sans-serif;">
+      <div style="max-width:520px; margin:0 auto; padding:32px 16px;">
+
+        <!-- Header -->
+        <div style="margin-bottom:24px;">
+          <h1 style="color:#c9a84c; font-size:20px; margin:0 0 4px;">GachaDailyTracker</h1>
+          <p style="color:#71717a; font-size:13px; margin:0;">Verify your email</p>
+        </div>
+
+        <!-- Body -->
+        <div style="background:#18181b; border:1px solid #27272a; border-radius:8px; padding:24px; margin-bottom:16px;">
+          <p style="color:#f0ede8; font-size:14px; margin:0 0 12px;">
+            Hi ${escapeHtml(username)},
+          </p>
+          <p style="color:#a1a1aa; font-size:14px; margin:0 0 20px;">
+            Enter this code on GachaDailyTracker to confirm this is your email address.
+          </p>
+          <div style="text-align:center;">
+            <span style="display:inline-block; background:#09090b; border:1px solid #c9a84c; color:#e8c86a;
+                         padding:12px 24px; border-radius:6px; font-size:28px; font-weight:700;
+                         letter-spacing:8px; font-family:monospace;">
+              ${escapeHtml(code)}
+            </span>
+          </div>
+          <p style="color:#52525b; font-size:12px; margin:20px 0 0; text-align:center;">
+            If you didn't create an account, you can safely ignore this email.
+          </p>
+        </div>
+
+        <!-- Footer -->
+        <div style="border-top:1px solid #27272a; padding-top:16px;">
+          <p style="color:#3f3f46; font-size:11px; text-align:center; margin:0;">
+            GachaDailyTracker &middot; This code expires in ${expiresInMinutes} minutes
+          </p>
+        </div>
+
+      </div>
+    </body>
+    </html>
+  `;
+}
+
 function formatResetTime(dailyReset: string, timezone: string): string {
   const [hours, minutes] = dailyReset.split(':').map(Number);
   const date = new Date();

@@ -52,7 +52,12 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    return NextResponse.json({ token: loginData.token, user: loginData.user, synced });
+    return NextResponse.json({
+      token: loginData.token,
+      user: loginData.user,
+      synced,
+      verification_sent: registerData.verification_sent === true,
+    });
   } catch {
     return NextResponse.json({ error: 'Registration failed' }, { status: 500 });
   }

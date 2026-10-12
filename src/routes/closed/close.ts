@@ -1,12 +1,13 @@
 import express, { Router } from 'express';
 import database from '../../config/database';
-import { authenticateToken } from '../../middleware/auth';
+import { requireAdmin } from '../../middleware/admin';
 import TimezoneService from '../../services/timezoneService';
 
 const updateRouter: Router = express.Router();
 
-// Apply authentication to all routes in this file
-updateRouter.use(authenticateToken);
+// Editing, adding and deleting games is admin-only (role 3+, verified email). This used to
+// be authenticateToken alone, which let any logged-in user change the catalog.
+updateRouter.use(requireAdmin);
 
 /**
  * @swagger

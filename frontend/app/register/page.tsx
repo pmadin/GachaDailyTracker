@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '../_context/AuthContext';
 import { getAnonGameIds, clearAnonGames } from '../_lib/storage';
+import VerifyEmailForm from '../_components/VerifyEmailForm';
 
 const PASSWORD_RULES = [
   { label: 'At least 15 characters',        test: (p: string) => p.length >= 15 },
@@ -24,6 +25,8 @@ export default function RegisterPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [pwFocused, setPwFocused] = useState(false);
+  // After the account is created, the same page swaps to the code entry step.
+  const [verifyStep, setVerifyStep] = useState<null | { codeSent: boolean }>(null);
 
   const showChecklist = pwFocused || password.length > 0;
   const allRulesMet = PASSWORD_RULES.every(r => r.test(password));
@@ -48,7 +51,11 @@ export default function RegisterPage() {
 
       if (data.synced) clearAnonGames();
 
-      router.push('/dashboard');
+      if (data.user?.email_verified === false) {
+        setVerifyStep({ codeSent: data.verification_sent === true });
+      } else {
+        router.push('/dashboard');
+      }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Registration failed');
     } finally {
@@ -74,6 +81,14 @@ export default function RegisterPage() {
         }}
       />
       <div className="w-full max-w-sm" style={{ position: 'relative', zIndex: 1 }}>
+        {verifyStep ? (
+          <VerifyEmailForm
+            initialCooldown={verifyStep.codeSent ? 60 : 0}
+            onVerified={() => router.push('/dashboard')}
+            onSkip={() => router.push('/dashboard')}
+          />
+        ) : (
+        <>
         <h1 className="mb-6 text-center text-2xl font-bold text-white">Create account</h1>
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
@@ -179,6 +194,8 @@ export default function RegisterPage() {
             Sign in
           </Link>
         </p>
+        </>
+        )}
       </div>
     </div>
   );

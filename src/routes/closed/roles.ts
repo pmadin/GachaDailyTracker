@@ -73,7 +73,7 @@ roleRouter.patch('/users/role/:username', requireAdmin, async (req: Request, res
 
         // Get target user by username
         const targetUserResult = await database.query(
-            'SELECT id, username, email, role FROM users WHERE username = $1',
+            'SELECT id, username, email, role, email_verified FROM users WHERE username = $1',
             [username]
         );
 
@@ -97,6 +97,14 @@ roleRouter.patch('/users/role/:username', requireAdmin, async (req: Request, res
         if (targetUser.role === ROLES.OWNER && adminUser.role < ROLES.OWNER) {
             return res.status(403).json({
                 error: 'Only owners can modify other owners'
+            });
+        }
+
+        // Admin/owner accounts must have a confirmed email; ask them to verify first.
+        if (newRole >= ROLES.ADMIN && !targetUser.email_verified) {
+            return res.status(409).json({
+                error: `${targetUser.username} must verify their email before they can be made an admin.`,
+                code: 'target_email_unverified'
             });
         }
 
@@ -232,7 +240,7 @@ roleRouter.get('/users', requireAdmin, async (req: Request, res: Response) => {
         const [countResult, usersResult] = await Promise.all([
             database.query(`SELECT COUNT(*) FROM users ${where}`, params),
             database.query(
-                `SELECT id, username, email, role, timezone, streak_count, created_at, updated_at
+                `SELECT id, username, email, role, timezone, streak_count, email_verified, created_at, updated_at
                  FROM users
                  ${where}
                  ORDER BY role DESC, created_at DESC
@@ -305,7 +313,7 @@ roleRouter.get('/users/search', requireAdmin, async (req: Request, res: Response
 
 
         const searchResult = await database.query(`
-            SELECT id, username, email, role, timezone, streak_count, created_at, updated_at
+            SELECT id, username, email, role, timezone, streak_count, email_verified, created_at, updated_at
             FROM users
             WHERE username ILIKE $1 OR email ILIKE $1
             ORDER BY

@@ -42,6 +42,11 @@ export interface AuthUser {
   email: string;
   timezone: string | null;
   role: number;
+  // Missing on sessions stored before V5 email verification; treat undefined as "unknown",
+  // not as unverified (those accounts were all grandfathered in).
+  email_verified?: boolean;
+  // ISO timestamp; set only for new signups. Unverified past this, the account is deleted.
+  email_verify_deadline?: string | null;
 }
 
 export interface GamesParams {
@@ -181,7 +186,7 @@ export async function updateEmail(
   token: string,
   newEmail: string,
   password: string,
-): Promise<{ user: { id: number; username: string; email: string } }> {
+): Promise<{ user: { id: number; username: string; email: string; email_verified: boolean }; verification_sent: boolean }> {
   return apiFetch('/gdt/auth/update-email', {
     method: 'PATCH',
     headers: authHeader(token),
@@ -355,6 +360,7 @@ export interface AdminUser {
   roleName: string;
   timezone: string;
   streak_count: number;
+  email_verified?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -605,11 +611,29 @@ export async function resetPassword(token: string, newPassword: string): Promise
   });
 }
 
+// ─── Email Verification ───────────────────────────────────────────────────────
+
+export async function verifyEmail(token: string, code: string): Promise<{ message: string; email_verified: true }> {
+  return apiFetch('/gdt/auth/verify-email', {
+    method: 'POST',
+    headers: authHeader(token),
+    body: JSON.stringify({ code }),
+  });
+}
+
+export async function resendVerificationCode(token: string): Promise<{ message: string }> {
+  return apiFetch('/gdt/auth/verify-email/resend', {
+    method: 'POST',
+    headers: authHeader(token),
+  });
+}
+
 // ─── Email Preferences ────────────────────────────────────────────────────────
 
 export interface EmailPreferences {
   email_digest_enabled: boolean;
   email_digest_hour: number;
+  email_verified?: boolean;
 }
 
 export async function fetchEmailPreferences(token: string): Promise<EmailPreferences> {

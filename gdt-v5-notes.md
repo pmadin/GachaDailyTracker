@@ -1,80 +1,195 @@
-# GDT V5 — Planning Notes
+# GDT V5: Release Notes & Plan
 
-Running list of deferred items, ideas, and open questions for V5 scoping.
-Update this file as new items come up across sessions.
+V5 isn't one big drop. It ships as a series of chunks merged to `main` over time. This file tracks what's already in V5, what's still planned, and in what order. When V5 is called done, section 1 becomes the V5 entry in the README version history.
 
----
-
-## Deferred from V4 / V4.5
-
-### IP Geolocation (timezone)
-`getTimezoneFromIP()` in `src/services/timezoneService.ts` is currently a stub that always returns `America/Los_Angeles`. The frontend fix (sending browser timezone at registration) means real users never hit this path — only raw API/curl calls do. Not urgent, but implementing it would close the last gap in the timezone detection chain.
-
-Candidate services (all have free tiers adequate for current volume):
-- `ipapi.co` — no API key needed, 1,000 req/day
-- `ip-api.com` — no API key needed, 1,000 req/min
-- `ipinfo.io` — free key, 50,000 req/month
+Last V4 commit: `30ee1c5` (2026-05-22). Everything after that counts as V5.
 
 ---
 
-## New V5 Candidates
+## 1. Shipped in V5 so far ✅
 
-### Disposable / temp email blocking at registration
-A user registered with `nogid52036@dosbee.com` (dosbee.com is a known disposable email domain). Options:
+**Streaks & badges**
+- ✅ Streak achievement badges on `/profile`, real CSS 3D polyhedra from Iron (7 days) to Diamond (365 days), no WebGL (`6d3b9f2`)
+- ✅ Permanent `users.streak_best` that never resets, so badges survive a broken streak (`6d3b9f2`)
+- ✅ End-to-end badge milestone test (`npm run test:streak-trigger`), badge preview moved behind admin (`7ca8d22`)
+- ✅ Current streak counter with progress to the next badge (`a308549`)
 
-- **Option A — Domain blocklist:** Maintain a list of known temp mail domains and reject at signup. Simple but cat-and-mouse — new services appear constantly.
-- **Option B — Email verification required:** Force users to verify email before account is active. Most effective gate. You already have Resend set up so infrastructure exists. Adds friction for real users.
-- **Option C — Inactive account cleanup job:** Scheduled cron on Heroku that deletes accounts older than X days with zero games added and unverified/unconfirmed email. Cleans the DB automatically rather than blocking at the door.
+**Homepage**
+- ✅ Status-first homepage for signed-in users (`87eb08d`)
 
-Recommendation: Option B (email verification) is the most standard and airtight. Option C is a good complement regardless.
+**Admin**
+- ✅ Statistics/analytics panel: KPIs, signup/completion trends (7d to all-time), top streaks, most-tracked games, region and country breakdowns, every chart has a table view (`977baaf`)
+- ✅ Sortable Users/Submissions tables, real pagination, emails masked server-side (`a925fd9`)
+- ✅ Kintsugi background generator at `/admin/kintsugi`: seeded, islands grown by sequential cracking, SVG export (`d7dfdcc`, `2467027`)
 
-### Streak badge mascot art
-V1 of the streak achievement badges (`/profile`, shipped this session — see `src/constants/streakTiers.ts`, `frontend/app/_lib/{badges,polyhedra}.ts`, `frontend/app/_components/PolyhedronBadge.tsx`) uses real, freely-spinning CSS 3D polyhedra as the badge art — tetrahedron through a great stellated dodecahedron for Diamond, complexity scaling with tier, all on-brand gold/grey/bronze, no WebGL. That ships now.
+**Game data**
+- ✅ Safe upstream sync: never deletes games, renames in place via `data/game-renames.json`, dry run preview, refuses if upstream looks truncated, never deactivates a game someone tracks (`c0f1227`)
+- ✅ Sync planner unit tests plus Postman/CI coverage (`ffa6915`)
 
-A chibi anime-girl mascot per tier is the floated upgrade path beyond that: a small mascot character (matching the Kintsugi gold theme, gacha-genre-appropriate) standing beside or holding each tier's medal, in the spirit of Azur Lane's limited-event medal art. Explicitly not scoped for v1 — no settled character design exists yet, and character art has a much higher bar to get right than geometric shapes. Six copy-pasteable image-gen prompts (Iron → Diamond) were drafted alongside this feature for previewing the concept in a separate session before committing to a direction.
+**Profile**
+- ✅ Timezone selector and IANA timezone validation fix (`333c386`)
 
-Open questions:
-- Chibi mascot per tier, or one consistent mascot with tier-colored outfit/accessories?
-- Static illustration vs. something animated to match the existing spinning-badge treatment?
-- Does this replace the polyhedra badges outright, or sit alongside them (e.g. mascot as a bigger "profile banner" reveal, polyhedra staying as the compact badge row)?
+**Design**
+- ✅ Custom on-brand 404 page, "This banner has already ended." (`b51286f`)
+- ✅ Kintsugi card hover veins fixed (pointed at a missing SVG before), toned down and turned off on admin/profile cards (`c61dc48`, `6dcb402`)
 
-### Streak badge "unlocked" toast
-The milestone trigger itself is verified end-to-end (`npm run test:streak-trigger`: every tier unlocks at its exact threshold, `streak_best` survives a broken streak). But nothing tells the user in the moment: `POST /tracker/streak` already returns `streakBest`, and the dashboard/home `checkStreak` handlers ignore it, so a newly earned badge only shows up if the user happens to visit `/profile`.
+**Reliability & ops**
+- ✅ Release-phase schema check: Heroku refuses a deploy if the live DB is missing a table or column from `01-schema.sql` (`f565b51`)
+- ✅ Daily scheduled Heroku backups plus `npm run backup:pull` for local copies (`f565b51`)
+- ✅ Stopped logging the full `DATABASE_URL` on connection errors (`746eb4b`)
+- ✅ Clearer error for Brave's disabled push service, spam-folder note on the reset email (`6f1ffa3`)
 
-Idea: when `streakBest` crosses a tier threshold (compare `highestEarnedTier(prevBest)` vs `highestEarnedTier(streakBest)` from `_lib/badges.ts`), show a toast with the tier's `PolyhedronBadge` + "Iron badge unlocked, 7-day streak", linking to `/profile`. Fire alongside the existing all-complete confetti.
-
-Open questions:
-- Where does `prevBest` come from? Fetch profile on mount, or have the API return a `tierUnlocked` field so the client doesn't need to diff?
-- Dedup across refreshes (like `gdt_confetti_date`) so it only fires once per tier?
-- Anon users have no `streak_best`. Skip, or track a local best in `gdt_streak`?
-
-### 404 mascot
-`frontend/app/not-found.tsx` shipped as a simple on-brand page: gold "404" with a kintsugi crack, vein background, "This banner has already ended." copy, Home / Browse games buttons. Planned upgrade: a dazed chibi anime-girl face with swirly spiral (@_@) eyes above/beside the 404. Same art direction as the streak badge mascot idea above, so ideally the same character. Keep it a static SVG/PNG (no JS) so the 404 stays a zero-JS Server Component. Maybe a slow spin on the swirl eyes via CSS only.
-
-### Kintsugi background generator
-Experimental admin page at `/admin/kintsugi` (`frontend/app/admin/kintsugi/`). Generates backgrounds procedurally instead of tracing Gemini images in Illustrator. Islands are the only shapes: a solid gold canvas with dark islands on top, and the veins are the gold showing through.
-
-The islands come from sequential cracking, the way real pottery breaks. The generator repeatedly grows a smooth crack through the biggest island until both ends hit older cracks, which gives T-junctions (smooth through-sides, sharp acute tips) and older-thicker/newer-thinner veins. Each island outline is then fitted with long Bézier curves, keeping tips only where the outline really turns sharply. An earlier Voronoi version gave symmetric Y-junctions, which read as turtle shell or onion cells, so it was dropped.
-
-Seeded and URL-driven, with Delta and Trunks presets, island-outline and in-situ previews (login, homepage hero, card hover) and SVG / two-tone export.
-
-Follow-ups:
-- Generation takes ~1 s. Fine for a tool, but a Web Worker would keep slider drags smooth.
-- **Broken card hover.** `.kintsugi-card::before` in `globals.css` points at `/kintsugi-veins.svg`, which doesn't exist, so the hover vein effect never shows and every page with a kintsugi card makes a 404 request. Generate one with the tool, save it as `frontend/public/kintsugi-veins.svg`, and check the hover.
-- Once a few generated backgrounds look right, give each auth page its own instead of rotating the same login SVG.
-
-### Hoyolab API sync
-Allow users to sync in-game daily progress automatically via the Hoyolab API (Genshin Impact, Honkai: Star Rail, Zenless Zone Zero, etc.). Most viable first target given Hoyoverse's documented API.
-
-Open questions:
-- Which games to target first (Genshin vs HSR vs ZZZ)?
-- Read-only sync vs. write (auto check-in)?
-- UID / auth token UX flow — how does the user connect their Hoyolab account?
-- Branch strategy — experimental branch vs. v4.5 vs. straight into V5?
+**Accounts & security**
+- ✅ Email verification with OTP codes, fake-domain blocking, 7-day cleanup of unverified signups, and verified-only admin/submissions/scheduler/digest/badges (see Pillar 1)
+- ✅ Closed the `/gdt/update/*` hole that let any logged-in user edit or delete games
 
 ---
 
-## Open Questions for V5 Scoping
-- Is email verification worth the registration friction at current user volume?
-- Should Hoyolab sync be an experimental branch first or committed to as a V5 pillar?
-- Any analytics-driven features from Vercel data (e.g. most tracked games, peak usage times)?
+## 2. Pillar 1: Email verification ✅
+
+Started when someone registered with `nogid52036@dosbee.com`, a known disposable domain. Built in October 2026.
+
+**Signup and verification**
+- ✅ 6-digit code emailed through Resend at signup. The register page switches to a code screen ("Skip for now" allowed), and `/verify-email` handles it later.
+- ✅ Codes are hashed (HMAC with the pepper), expire in 10 minutes, die after 5 wrong tries, and can be resent once every 60 seconds.
+- ✅ Changing your email resets verification and sends a code to the new address.
+- ✅ Existing accounts were grandfathered as verified by the migration.
+- ✅ Without `RESEND_API_KEY` (local Docker), the code is printed in the backend log instead.
+
+**Stopping fake addresses**
+- ✅ MX check at signup and email change: domains that don't exist, have no mail server, or have broken mail DNS (like a parked `nut.com`) are refused before an account is created. Temp-mail services with real mail servers still pass; verification is the gate for those. `SKIP_EMAIL_DOMAIN_CHECK=true` turns it off in CI.
+- ✅ New signups that don't verify within 7 days are auto-deleted by an hourly job (`users.email_verify_deadline`). Never applies to grandfathered accounts, admins, or existing users who changed their email.
+
+**What unverified accounts can't do**
+- ✅ Admin tools: every admin route refuses, and the admin area shows a lock screen. An unverified user can't be promoted to Admin/Owner.
+- ✅ Game submissions and the play scheduler.
+- ✅ Daily email digest (can't be turned on, and the cron skips them).
+- ✅ Streak badges stay locked. Streaks still count, and earned badges unlock the moment they verify.
+
+**UI**
+- ✅ Banner under the navbar with the deletion date, and a "limited banner" countdown card on `/profile` (days/hrs/min/sec, red in the last 24 hours).
+
+**Security fix found along the way:** `/gdt/update/*` (edit, add, delete games) only checked for a login, so any account could change the catalog. It now requires a verified admin.
+
+**Email setup follow-ups (DNS, no code)**
+- Add a DMARC record (Cloudflare → Email → DMARC Management, or TXT `_dmarc` = `v=DMARC1; p=none;`), move to `p=quarantine` after a couple of clean weeks.
+- Replace `noreply@` with a real address (`hello@`) through Cloudflare Email Routing and `RESEND_FROM_EMAIL` on Heroku.
+- Optional later: send from a subdomain (`mail.gachadailytracker.com`) to isolate reputation.
+
+---
+
+## 3. Pillar 2: Streak badge unlock reveal
+
+Badges unlock correctly today, but nothing tells the user. `POST /tracker/streak` already returns `streakBest` and the dashboard/home handlers ignore it, so a new badge only shows up if someone visits `/profile`.
+
+**The vision: a gacha pull reveal.** When a tier unlocks, a centered overlay plays like a gold pull in WuWa or NIKKE: the screen dims, a streak of light, a burst in the tier's color (Iron grey up to Diamond), then the `PolyhedronBadge` spins in with the tier name and "N-day streak". Click or Esc to skip, and a simple fade for `prefers-reduced-motion`.
+
+**Fallback if the full overlay is too much:** a corner toast, "New badge unlocked". The toast alone is the minimum notice. Clicking it opens a reveal page styled like a banner pull, loot box, or CS2 case opening. Watching it is optional.
+
+**Implementation notes**
+- Have the API return `tierUnlocked` so the client doesn't need to diff. Read the old `streak_best` in the same statement (CTE) in `src/routes/tracker/tracker.ts`, compare with `highestEarnedTier()` from `src/constants/streakTiers.ts` (mirrored in `frontend/app/_lib/badges.ts`).
+- Trigger from the dashboard `handleToggleComplete` and home `handleToggle`, alongside the existing confetti.
+- Dedupe per tier in localStorage (same idea as `gdt_confetti_date`) so a refresh doesn't replay it.
+- **Anon users:** skipped. No badges for anon, they're the simple-tracking tier.
+- **Unverified accounts:** skipped too. Their badges are locked until they verify, so the reveal should fire on verification instead (or the next time they unlock a tier).
+
+---
+
+## 4. Pillar 3: Game submissions revamp + review the 15 pending games
+
+Comes before weekly resets. 15 user-submitted games are sitting in `game_submissions` unreviewed, and the admin page needs work before reviewing them makes sense.
+
+**What "Approve" does today** (`PATCH /admin/submissions/:id` in `src/routes/submissions.ts`): marks the submission approved and inserts the game into `games` with `is_active = false`, `source = 'user-submission'` and no icon. If a game with the same name and server already exists, the insert silently does nothing. The admin then has to find it on `/admin/games` and activate it by hand. There's no way to fix typos before approving, no icon, and no preview.
+
+**Icons.** Every icon `<img>` builds `${NEXT_PUBLIC_ICONS_BASE_URL}/${icon_name}.gif`, and that base URL is the Game-Time-Master GitHub folder. Submitted games aren't in that repo, so they need their own storage. That logic is copy-pasted in `GameCard`, `DashboardCard`, `GamesTray`, `PopularGames` and `home/TodayPlan`; replace those with one `gameIconSrc(game)` helper.
+
+**Where to store custom icons** (decide together):
+- **Postgres `bytea` (leaning this way).** Heroku's dyno filesystem is wiped on every restart, so "store it on Heroku" really means storing it in the DB. A 96×96 icon is about 5–15 KB, so even 50 of them is tiny. Admins can upload from the UI, the API serves them at something like `/gdt/icons/custom/:id` with long cache headers, and they're in the daily backups for free.
+- **Git repo** (`frontend/public/icons-custom/`). Simplest to serve through Vercel, but every icon needs a commit and a deploy, so no uploading from the admin page.
+- Vercel Blob also works but adds another service for a handful of files.
+
+**Upload rules**
+- Admins only (role 3+). Users can never upload files.
+- Still clean admin uploads: check the real file type from the bytes (PNG, JPEG, WebP, GIF; no SVG), cap the input size (~2 MB), then re-encode with `sharp`, which strips metadata and anything hidden in the file.
+- Resize to 96×96 to match the upstream icons, keeping the aspect ratio (pad to square, or center-crop; pick after trying a few).
+- Same processing as a CLI script (`scripts/process-icon.js`) for batch or local use.
+
+**Admin submissions page revamp** (`frontend/app/admin/submissions/page.tsx`)
+- Edit name, server, timezone and daily reset before approving, with the submitter's original values shown next to them.
+- Duplicate check: list existing games with a similar name or server so near-duplicates get caught.
+- Icon upload with a **live preview** of the real `GameCard` and `DashboardCard` using the edited data (countdown, local reset time, server tag), so the admin sees exactly what users will see.
+- "Approve & activate" in one step, with "approve as inactive" still available. Reject with a note.
+- Schema likely gets `games.icon_data BYTEA` + `icon_mime` (or a separate `game_icons` table), and maybe a `content_rating` column. Heroku migration first.
+
+**Then review the 15 together.** Check each one against official sources (reset time, server, timezone), fix what's wrong, add an icon, approve or reject.
+
+**NSFW / adult gacha games.** Not disallowed, but a gray area. Options:
+- (a) Allow with a `content_rating` flag. Hidden from browse and popular lists by default, opt-in toggle (profile for accounts, localStorage for anon), icon blurred until opted in.
+- (b) Allow only if the game is on a mainstream store (Google Play, App Store, Steam) and use that store's rating as the line.
+- (c) Reject explicit-only titles.
+
+Leaning (a). Decide during the review. The ToS and privacy policy may need a line either way.
+
+---
+
+## 5. Pillar 4: Weekly resets
+
+From a closed GitHub issue: WuWa has a mode that gives 160 Astrite and resets weekly, HSR has a similar weekly mode for pull currency. When asked, the idea was a weekly checkbox that resets once a week next to the daily one (not a weekly history view).
+
+**Notes**
+- Game-Time-Master has no weekly data, only `dailyReset`, so weekly reset days are admin-curated. Most games reset Monday at their daily reset time. Add `games.weekly_reset_day SMALLINT` (null means no weekly tracking).
+- Store completions in a `weekly_completions` table (or a `period_type` column on `daily_completions`), with the period computed in game-local time like the V2.5 daily fix.
+- UI: a second checkbox or "weekly" pill on `DashboardCard`, with a countdown to the weekly reset. The admin games page gets a weekly-day field. Submissions could include it later.
+
+**Open questions**
+- One weekly box per game, or multiple named weeklies (bosses, shop, mode)?
+- Do weeklies count toward the streak?
+- Anon support? Probably yes, it's cheap in localStorage.
+
+---
+
+## 6. Smaller V5 items
+
+**Anon browser notifications.** Anon users are deliberately minimal, but notifications are the one thing they really miss. Idea: after an anon user adds their first game, a small settings prompt offers to turn on browser push. The catch is that push is sent by the server per user (`push_subscriptions.user_id`, `src/workers/notificationCron.ts`), so anon push needs either an anon subscription row that carries their game IDs, or a lighter "notify while the tab is open" mode. Clearing site data removes it, same as the rest of anon state.
+
+**Per-page kintsugi backgrounds.** ✅ The generator itself is done. What's left: give login, register, forgot-password, reset-password and 404 their own generated SVGs, since they all share `kintsugi-veins-login-reg.svg` right now. A Web Worker to keep slider drags smooth is optional.
+
+**Popular Games: count anon users, weighted.** Right now only accounts move the chart. `/games/popular` ranks by `games.add_count`, which only goes up on the logged-in add routes (`POST /tracker/games/:id` and `/bulk` in `src/routes/tracker/tracker.ts`). Anon adds stay in localStorage, and only reach the chart if that person later registers and their list gets bulk-synced. `add_count` also never goes down: removing a game or deleting an account doesn't subtract, so it's lifetime adds rather than current popularity. With a small user base, a few accounts adding and removing games reshuffled the top 10 a lot within about two months.
+
+Plan: a weighted score that mixes both groups.
+- **Accounts:** rank by how many users track the game right now (`COUNT(*)` from `user_games`) instead of the lifetime `add_count`, so removals and deleted accounts drop out.
+- **Anon:** new `games.anon_add_count` column, bumped by a public endpoint (e.g. `POST /games/:id/anon-add`) when an anon user adds a game. One count per game per browser (localStorage flag) and a per-IP rate limit, since anyone can call an endpoint that has no login. Removing the game in the browser could call a matching decrement.
+- **Score:** something like `current_trackers + 0.5 × anon_add_count`, with the anon weight stored in `site_settings` so an admin can tune it or set it to 0 if it gets gamed.
+- Count each person only once: a registering anon user's bulk sync already counts them as an account, so it shouldn't also keep their anon count. Accept a small overlap or decrement on sync.
+- Keep `add_count` for the analytics panel's history.
+
+Open questions: starting weight? Does anon decrement on remove, or count adds only? Show the account/anon breakdown in admin analytics?
+
+**IP geolocation.** Low priority. `getTimezoneFromIP()` in `src/services/timezoneService.ts` is still a stub returning `America/Los_Angeles`. Real users send their browser timezone at signup, so only raw API calls hit it. Free options if it's ever needed: `ipapi.co`, `ip-api.com`, `ipinfo.io`.
+
+---
+
+## 7. Last, for fun: Gacha-chan mascot
+
+Replaces the old "badge mascot per tier" idea. The polyhedra stay as the badge art.
+
+- **Gacha-chan:** the embodiment of the top-tier pull, the gold/SSR/UR character. Kintsugi black and gold, chibi style. Other character ideas are welcome.
+- **First use:** a dazed Gacha-chan with swirly (@_@) eyes on the 404 page, as a static SVG so the 404 stays a zero-JS Server Component. Maybe a slow CSS-only spin on the eyes.
+- **Later:** she could show up in the badge reveal.
+- **Needs concept work first:** silhouette, outfit, gold-crack motifs, a few expressions. Hand-written SVG anime art from Claude is hit or miss, so the likely path is concept art with an image generator, then trace and simplify to SVG.
+
+---
+
+## 8. Dropped
+
+- **Hoyolab API sync.** No official public API, it would need users' Hoyolab auth cookies, and it risks breaking Hoyoverse's ToS. Not doing it.
+
+---
+
+## 9. Open questions
+
+- Custom icon storage: DB or repo?
+- NSFW policy for submitted games
+- Weekly resets: one box per game or named weeklies?
+- Is anon push worth the backend work?
+- Popular Games: anon weight, and whether to rank by current trackers

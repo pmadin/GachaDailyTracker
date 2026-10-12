@@ -50,7 +50,8 @@ login() { # <username> -> prints JWT
 register ci_sync_admin ci-sync-admin@example.com
 register ci_sync_user ci-sync-user@example.com
 
-psql -v ON_ERROR_STOP=1 -q -c "UPDATE users SET role = 3 WHERE username = 'ci_sync_admin'" >&2
+# Admin routes require a verified email, so the promoted CI admin is marked verified too.
+psql -v ON_ERROR_STOP=1 -q -c "UPDATE users SET role = 3, email_verified = true WHERE username = 'ci_sync_admin'" >&2
 log "promoted ci_sync_admin to role 3"
 
 psql -v ON_ERROR_STOP=1 -q >&2 <<'SQL'

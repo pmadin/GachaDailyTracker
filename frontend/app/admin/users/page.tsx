@@ -110,12 +110,21 @@ function RoleChangeModal({
               className="w-full rounded-lg px-3 py-2 text-sm text-white outline-none"
               style={{ border: '1px solid rgba(200,155,60,0.15)', background: 'var(--surface)' }}
             >
-              {availableRoles.map(r => (
-                <option key={r} value={r} style={{ background: 'var(--surface)' }}>
-                  {ROLE_LABELS[r]}
-                </option>
-              ))}
+              {availableRoles.map(r => {
+                // The API refuses admin/owner for unverified accounts; mirror that here.
+                const blocked = r >= 3 && target.email_verified === false;
+                return (
+                  <option key={r} value={r} disabled={blocked} style={{ background: 'var(--surface)' }}>
+                    {ROLE_LABELS[r]}{blocked ? ' (needs verified email)' : ''}
+                  </option>
+                );
+              })}
             </select>
+            {target.email_verified === false && (
+              <p className="mt-1.5 text-xs" style={{ color: 'var(--text2)' }}>
+                {target.username} hasn&apos;t verified their email yet, so they can&apos;t be made an admin.
+              </p>
+            )}
           </div>
           <div>
             <label className="mb-1 block text-xs text-zinc-400">Reason (required)</label>
@@ -368,7 +377,14 @@ export default function AdminUsersPage() {
                     <div className="font-medium text-white">{u.username}</div>
                     <div className="text-xs text-zinc-500 sm:hidden">{u.email}</div>
                   </td>
-                  <td className="hidden px-4 py-3 text-zinc-400 sm:table-cell">{u.email}</td>
+                  <td className="hidden px-4 py-3 text-zinc-400 sm:table-cell">
+                    {u.email}
+                    {u.email_verified === false && (
+                      <span className="ml-2 rounded-full px-1.5 py-0.5 text-[10px]" style={{ border: '1px solid var(--border2)', color: 'var(--text2)' }}>
+                        unverified
+                      </span>
+                    )}
+                  </td>
                   <td className="px-4 py-3">
                     <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${ROLE_COLORS[u.role]}`}>
                       {u.roleName}

@@ -4,6 +4,7 @@ import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
 import Link from 'next/link';
 import { getNextResetMs, msToCountdown } from '../../_lib/countdown';
 import { streakProgress } from '../../_lib/badges';
+import { useAuth } from '../../_context/AuthContext';
 import type { TrayGame } from '../GamesTray';
 
 interface Props {
@@ -79,6 +80,8 @@ function Bar({ value }: { value: number }) {
 }
 
 export default function StatusRow({ games, streak, streakBest }: Props) {
+  const { user } = useAuth();
+  const badgesLocked = user?.email_verified === false;
   const [, setTick] = useState(0);
   useEffect(() => {
     const id = setInterval(() => setTick(t => t + 1), 1000);
@@ -135,7 +138,9 @@ export default function StatusRow({ games, streak, streakBest }: Props) {
             </p>
           </>
         ) : (
-          <p style={{ margin: 0, fontSize: 12, color: 'var(--gold-bright)' }}>Every badge earned. Keep it going.</p>
+          <p style={{ margin: 0, fontSize: 12, color: badgesLocked ? 'var(--text2)' : 'var(--gold-bright)' }}>
+            {badgesLocked ? 'Verify your email to unlock your badges' : 'Every badge earned. Keep it going.'}
+          </p>
         )}
       </Card>
 

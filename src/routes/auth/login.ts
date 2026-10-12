@@ -77,7 +77,7 @@ loginRouter.post('/login', async (req: Request, res: Response) => {
 
         // Find user by email or username (username match is case-insensitive)
         const result = await database.query(
-            'SELECT id, username, email, password_hash, timezone, role FROM users WHERE email = $1 OR LOWER(username) = LOWER($1)',
+            'SELECT id, username, email, password_hash, timezone, role, email_verified, email_verify_deadline FROM users WHERE email = $1 OR LOWER(username) = LOWER($1)',
             [identifier]
         );
 
@@ -133,7 +133,9 @@ loginRouter.post('/login', async (req: Request, res: Response) => {
                 username: user.username,
                 email: user.email,
                 role: user.role,
-                timezone: user.timezone
+                timezone: user.timezone,
+                email_verified: user.email_verified,
+                email_verify_deadline: user.email_verify_deadline
             },
             expires_in: '30 days'
         });

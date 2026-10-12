@@ -4,6 +4,7 @@ import { useEffect, useState, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '../_context/AuthContext';
 import { fetchSchedules, fetchTrackerGames } from '../_lib/api';
+import VerifyEmailGate from '../_components/VerifyEmailGate';
 import type { Schedule, TrackedGame } from '../_lib/api';
 import ScheduleModal from '../_components/ScheduleModal';
 import type { ScheduleFormData } from '../_components/ScheduleModal';
@@ -61,7 +62,8 @@ function daysLabel(days: number[]): string {
 }
 
 export default function SchedulePage() {
-  const { token, isLoading: authLoading } = useAuth();
+  const { token, user, isLoading: authLoading } = useAuth();
+  const emailUnverified = user?.email_verified === false;
   const router = useRouter();
   const [view, setView] = useState<View>('day');
   const [schedules, setSchedules] = useState<Schedule[]>([]);
@@ -81,6 +83,7 @@ export default function SchedulePage() {
       router.push('/login');
       return;
     }
+    if (emailUnverified) return; // the scheduler is locked; the gate below explains why
     Promise.all([fetchSchedules(token), fetchTrackerGames(token)])
       .then(([schRes, trRes]) => {
         setSchedules(schRes.schedules);
@@ -88,7 +91,7 @@ export default function SchedulePage() {
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [authLoading, token, router]);
+  }, [authLoading, token, router, emailUnverified]);
 
   // Scroll to current hour in day view
   useEffect(() => {
@@ -144,6 +147,17 @@ export default function SchedulePage() {
         };
       })()
     : null;
+
+  if (!authLoading && token && emailUnverified) {
+    return (
+      <div className="mx-auto max-w-6xl px-4 py-16">
+        <VerifyEmailGate
+          title="Verify your email to use the scheduler"
+          message="Play windows and schedule reminders unlock once your email is confirmed. It only takes a minute."
+        />
+      </div>
+    );
+  }
 
   if (authLoading || loading) {
     return (
