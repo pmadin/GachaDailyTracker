@@ -12,7 +12,12 @@
  * goes through the real API. The users are left in place (credentials printed at the end) for a
  * manual /profile check — remove them with: npm run test:streak-trigger:cleanup
  *
- * Run with: npm run local  (backend on the Docker DB), then  npm run test:streak-trigger
+ * Test users sign up with @example.test addresses, so the backend has to run with the MX check
+ * off (same as CI). Verification is skipped by flipping email_verified in SQL, so no code is
+ * ever needed.
+ *
+ * Run with (PowerShell):  $env:SKIP_EMAIL_DOMAIN_CHECK='true'; npm run local
+ *                  then:  npm run test:streak-trigger
  */
 import 'dotenv/config';
 import { Client } from 'pg';
@@ -70,6 +75,13 @@ async function main(): Promise<void> {
       const reg = await api('POST', '/auth/register', undefined, {
         username, email: `${username}@example.test`, password, confirmPassword: password, registrationToken,
       });
+      if (reg.json?.code === 'email_domain_no_mail') {
+        throw new Error(
+          'The backend refused the @example.test signup (MX check). Restart it with the check off:\n' +
+          "  PowerShell:  $env:SKIP_EMAIL_DOMAIN_CHECK='true'; npm run local\n" +
+          '  bash:        SKIP_EMAIL_DOMAIN_CHECK=true npm run local'
+        );
+      }
       if (reg.status !== 201) throw new Error(`register ${username} failed (HTTP ${reg.status}): ${JSON.stringify(reg.json)}`);
       const login = await api('POST', '/auth/login', undefined, { identifier: username, password });
       if (!login.json.token) throw new Error(`login ${username} failed: ${JSON.stringify(login.json)}`);
