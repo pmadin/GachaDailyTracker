@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { STREAK_TIERS } from '../../_lib/badges';
-import BadgeReveal from '../../_components/BadgeReveal';
+import BadgeReveal, { REVEAL_SPEED } from '../../_components/BadgeReveal';
 
 /**
  * Admin-only preview of the badge unlock reveal (BadgeReveal.tsx). No DB, no API calls, gated
@@ -15,7 +15,7 @@ import BadgeReveal from '../../_components/BadgeReveal';
 export default function RevealPreviewPage() {
   const [tierKey, setTierKey] = useState<(typeof STREAK_TIERS)[number]['key']>('iron');
   const [days, setDays] = useState(STREAK_TIERS[0].days);
-  const [speed, setSpeed] = useState(1);
+  const [speed, setSpeed] = useState(REVEAL_SPEED);
   const [reduced, setReduced] = useState(false);
   const [loop, setLoop] = useState(false);
   const [playKey, setPlayKey] = useState<number | null>(null);

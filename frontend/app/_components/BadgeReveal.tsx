@@ -6,6 +6,10 @@ import PolyhedronBadge from './PolyhedronBadge';
 import { STREAK_TIERS, type StreakTier } from '../_lib/badges';
 import { solidFor, greatStellatedDodecahedronFor, type SolidName } from '../_lib/polyhedra';
 
+// Real playback speed. The CSS timings were written at 1x, but 0.5x (picked on /admin/reveal)
+// reads better, so that's what users see. --rv-s = 1 / speed.
+export const REVEAL_SPEED = 0.5;
+
 // When the sequence is "done" (hint visible, next click closes), in ms at 1x speed.
 // Matches the .rv-hint delay in globals.css.
 const DONE_AT = 3200;
@@ -52,7 +56,7 @@ export default function BadgeReveal({
   tier,
   streakDays,
   onClose,
-  speed = 1,
+  speed = REVEAL_SPEED,
   forceReducedMotion = false,
 }: {
   tier: StreakTier;

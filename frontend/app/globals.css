@@ -283,8 +283,8 @@ body {
 }
 
 /* ── Streak badge unlock reveal (BadgeReveal.tsx, tuned on /admin/reveal) ──
-   Every timing is multiplied by --rv-s (1 = normal speed, 4 = quarter speed) so the preview
-   page can slow the whole sequence down. --rv-c1/--rv-c2 are the tier's dark/light colors.
+   Every timing is multiplied by --rv-s (1 / speed). Users see it at REVEAL_SPEED = 0.5 in
+   BadgeReveal.tsx, so the real sequence runs twice as long as the ms values below. --rv-c1/--rv-c2 are the tier's dark/light colors.
    One-shot entrance animations carry .rv-in so a skip can fast-forward just those; looping
    parts (rays, halo, shimmer, badge spin) live on inner elements and keep running. */
 .rv-root {
