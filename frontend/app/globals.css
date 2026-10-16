@@ -316,8 +316,8 @@ body {
   top: 46%;
   left: calc(50% - 70vmax);
   width: 70vmax;
-  height: 3px;
-  margin-top: -1.5px;
+  height: var(--rv-h, 3px);
+  margin-top: calc(var(--rv-h, 3px) / -2);
   transform-origin: right center;
   border-radius: 999px;
   background: linear-gradient(90deg, transparent 0%, color-mix(in srgb, var(--rv-c1) 60%, transparent) 55%, var(--rv-c2) 92%, #fffaf0 100%);

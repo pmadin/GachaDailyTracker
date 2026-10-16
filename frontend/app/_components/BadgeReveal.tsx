@@ -1,9 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import PolyhedronBadge from './PolyhedronBadge';
 import { STREAK_TIERS, type StreakTier } from '../_lib/badges';
+import { solidFor, greatStellatedDodecahedronFor, type SolidName } from '../_lib/polyhedra';
 
 // When the sequence is "done" (hint visible, next click closes), in ms at 1x speed.
 // Matches the .rv-hint delay in globals.css.
@@ -11,12 +12,31 @@ const DONE_AT = 3200;
 // Confetti fires with the impact flash. Matches the .rv-rays delay in globals.css.
 const CONFETTI_AT = 1050;
 
-// Streak angles/delays per tier rank: early tiers get one streak, Gold+ two, Diamond three.
-const STREAKS: { angle: number; delay: number }[] = [
-  { angle: 135, delay: 300 },
-  { angle: 162, delay: 420 },
-  { angle: 108, delay: 520 },
-];
+// Light streaks: one per face of the tier's solid (tetrahedron 4, cube 6, octahedron 8,
+// dodecahedron 12, icosahedron 20, great stellated dodecahedron 12), read from the same
+// geometry the badge renders so the two never drift apart.
+function faceCount(tier: StreakTier): number {
+  return tier.solid === 'great-stellated-dodecahedron'
+    ? greatStellatedDodecahedronFor(64).length
+    : solidFor(tier.solid as SolidName, 64).length;
+}
+
+// Each streak takes 700ms, so these delays land the hits between ~850ms and the ~1000ms
+// impact flash. Angles are spread evenly around the circle with a little jitter, and the
+// hit order follows the golden ratio so they don't arrive in a clockwise sweep.
+const STREAK_FIRST_DELAY = 150;
+const STREAK_WINDOW = 150;
+function buildStreaks(n: number): { angle: number; delay: number }[] {
+  const step = 360 / n;
+  return Array.from({ length: n }, (_, i) => {
+    const jitter = (((i * 0.7548776662) % 1) - 0.5) * step * 0.6;
+    const order = (i * 0.6180339887) % 1;
+    return {
+      angle: 135 + i * step + jitter,
+      delay: STREAK_FIRST_DELAY + (n > 1 ? order * STREAK_WINDOW : 0),
+    };
+  });
+}
 
 /**
  * Gacha-pull style overlay for a newly unlocked streak badge: dim, light streak, flash,
@@ -47,7 +67,9 @@ export default function BadgeReveal({
   const doneRef = useRef(false);
 
   const rank = STREAK_TIERS.findIndex(t => t.key === tier.key);
-  const streakCount = rank >= 5 ? 3 : rank >= 3 ? 2 : 1;
+  const streaks = useMemo(() => buildStreaks(faceCount(tier)), [tier]);
+  // Thinner lines once there are a lot of them, so 20 streaks don't turn into a blob.
+  const streakHeight = streaks.length > 12 ? 2 : 3;
   const scale = 1 / speed;
 
   const reducedMotion = useCallback(
@@ -142,12 +164,12 @@ export default function BadgeReveal({
         {rank >= 3 && <div className="rv-rays-spin rv-rays-alt" />}
       </div>
 
-      {STREAKS.slice(0, streakCount).map((s, i) => (
+      {streaks.map((s, i) => (
         <div
           key={i}
           className="rv-streak rv-in"
           aria-hidden="true"
-          style={{ '--rv-angle': `${s.angle}deg`, '--rv-d': `${s.delay}ms` } as CSSProperties}
+          style={{ '--rv-angle': `${s.angle}deg`, '--rv-d': `${s.delay}ms`, '--rv-h': `${streakHeight}px` } as CSSProperties}
         />
       ))}
       <div className="rv-ring rv-in" aria-hidden="true" />
