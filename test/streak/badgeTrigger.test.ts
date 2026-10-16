@@ -64,7 +64,8 @@ async function main(): Promise<void> {
     );
     const gameId: number = gameRow.rows[0].id;
 
-    async function createUser(suffix: string): Promise<{ id: number; username: string; token: string }> {
+    // Badges (and tierUnlocked) only apply to verified accounts; new signups start unverified.
+    async function createUser(suffix: string, verified = true): Promise<{ id: number; username: string; token: string }> {
       const username = `${TEST_USER_PREFIX}${suffix}`;
       const reg = await api('POST', '/auth/register', undefined, {
         username, email: `${username}@example.test`, password, confirmPassword: password, registrationToken,
@@ -74,6 +75,7 @@ async function main(): Promise<void> {
       if (!login.json.token) throw new Error(`login ${username} failed: ${JSON.stringify(login.json)}`);
       const track = await api('POST', `/tracker/games/${gameId}`, login.json.token);
       if (track.status >= 300) throw new Error(`track game for ${username} failed (HTTP ${track.status}): ${JSON.stringify(track.json)}`);
+      if (verified) await db.query(`UPDATE users SET email_verified = true WHERE id = $1`, [reg.json.user.id]);
       return { id: reg.json.user.id, username, token: login.json.token };
     }
 
@@ -116,6 +118,7 @@ async function main(): Promise<void> {
       const res = await api('POST', '/tracker/streak', u.token);
       check(`${tier.label}: POST /tracker/streak → streak ${N}, streakBest ${N}`,
         res.json.allComplete === true && res.json.streak === N && res.json.streakBest === N, JSON.stringify(res.json));
+      check(`${tier.label}: tierUnlocked = ${tier.key}`, res.json.tierUnlocked === tier.key, JSON.stringify(res.json));
 
       const profile = await api('GET', '/auth/profile', u.token);
       const best = profile.json.user?.streak_best;
@@ -136,6 +139,7 @@ async function main(): Promise<void> {
       const res = await api('POST', '/tracker/streak', all.token);
       check(`all: reaches ${tier.label} → streak ${N}, streakBest ${N}`,
         res.json.streak === N && res.json.streakBest === N, JSON.stringify(res.json));
+      check(`all: tierUnlocked = ${tier.key}`, res.json.tierUnlocked === tier.key, JSON.stringify(res.json));
       const earned = STREAK_TIERS.filter(t => res.json.streakBest >= t.days).map(t => t.key);
       check(`all: ${earned.length} badge(s) earned after ${tier.label}`,
         earned.length === STREAK_TIERS.indexOf(tier) + 1, earned.join(','));
@@ -145,6 +149,8 @@ async function main(): Promise<void> {
     const again = await api('POST', '/tracker/streak', all.token);
     check('all: second check same day is idempotent (365 / 365, "already counted")',
       again.json.streak === 365 && again.json.streakBest === 365 && /already counted/i.test(again.json.message ?? ''),
+      JSON.stringify(again.json));
+    check('all: repeat check same day → tierUnlocked null (reveal plays once)', again.json.tierUnlocked === null,
       JSON.stringify(again.json));
 
     await db.query(`UPDATE users SET streak_last_date = CURRENT_DATE - 3 WHERE id = $1`, [all.id]);
@@ -157,13 +163,26 @@ async function main(): Promise<void> {
     await clearRateLimit(all.id);
     const restart = await api('POST', '/tracker/streak', all.token);
     check('all: restart → streak 1, streakBest still 365',
-      restart.json.streak === 1 && restart.json.streakBest === 365, JSON.stringify(restart.json));
+      restart.json.streak === 1 && restart.json.streakBest === 365 && restart.json.tierUnlocked === null,
+      JSON.stringify(restart.json));
 
     const profile = await api('GET', '/auth/profile', all.token);
     check('all: GET /auth/profile → streak_count 1, streak_best 365, Diamond',
       profile.json.user?.streak_count === 1 && profile.json.user?.streak_best === 365 &&
         highestEarnedTier(profile.json.user?.streak_best)?.key === 'diamond',
       JSON.stringify({ c: profile.json.user?.streak_count, b: profile.json.user?.streak_best }));
+
+    // ── 3. Unverified user: streak and best still count, but no reveal ────────────────────
+    console.log('\n── ci_streak_unverified ──');
+    const unv = await createUser('unverified', false);
+    created.push(unv.username);
+    await seed(unv.id, 6, 6);
+    const unvDone = await api('POST', `/tracker/games/${gameId}/complete`, unv.token);
+    check('unverified: complete today\'s game', unvDone.status === 200, JSON.stringify(unvDone.json));
+    const unvRes = await api('POST', '/tracker/streak', unv.token);
+    check('unverified: reaches 7 → streakBest 7, tierUnlocked null',
+      unvRes.json.streak === 7 && unvRes.json.streakBest === 7 && unvRes.json.tierUnlocked === null,
+      JSON.stringify(unvRes.json));
 
     console.log(`\nTest users left in place for a manual /profile check: ${created.join(', ')}`);
     console.log(`Password (this run only): ${password}`);

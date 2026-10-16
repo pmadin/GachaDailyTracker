@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { Geist, Plus_Jakarta_Sans, JetBrains_Mono, Noto_Sans_JP } from 'next/font/google';
 import './globals.css';
 import { AuthProvider } from './_context/AuthContext';
+import { BadgeRevealProvider } from './_context/BadgeRevealContext';
 import Navbar from './_components/Navbar';
 import VerifyEmailBanner from './_components/VerifyEmailBanner';
 import Footer from './_components/Footer';
@@ -26,10 +27,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en" className={`${geist.variable} ${plusJakartaSans.variable} ${jetbrainsMono.variable} ${notoSansJP.variable} h-full`}>
       <body className="flex min-h-full flex-col antialiased">
         <AuthProvider>
-          <Navbar />
-          <VerifyEmailBanner />
-          <main className="flex-1">{children}</main>
-          <Footer />
+          <BadgeRevealProvider>
+            <Navbar />
+            <VerifyEmailBanner />
+            <main className="flex-1">{children}</main>
+            <Footer />
+          </BadgeRevealProvider>
         </AuthProvider>
         <Analytics />
         <SpeedInsights />
