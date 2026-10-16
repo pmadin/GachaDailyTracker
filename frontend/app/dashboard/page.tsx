@@ -6,6 +6,7 @@ import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from 
 import type { DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
 import { useAuth } from '../_context/AuthContext';
+import { useBadgeReveal } from '../_context/BadgeRevealContext';
 import { hasBrowserPushSubscription } from '../_lib/push';
 import {
   fetchTrackerGames,
@@ -39,6 +40,7 @@ import { getNextResetMs } from '../_lib/countdown';
 
 export default function DashboardPage() {
   const { token, user, isLoading: authLoading } = useAuth();
+  const { reveal } = useBadgeReveal();
   // The play scheduler needs a verified email, so unverified users don't get the schedule button.
   const canSchedule = !!token && user?.email_verified !== false;
   const [games, setGames] = useState<DashboardGame[]>([]);
@@ -175,7 +177,12 @@ export default function DashboardPage() {
 
       if (isNowAllDone) {
         if (token) {
-          checkStreak(token).then(r => setStreak(r.streak)).catch(() => {});
+          checkStreak(token)
+            .then(r => {
+              setStreak(r.streak);
+              if (r.tierUnlocked) reveal(r.tierUnlocked, r.streak);
+            })
+            .catch(() => {});
         } else {
           setStreak(updateAnonStreak());
         }

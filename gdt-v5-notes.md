@@ -13,6 +13,7 @@ Last V4 commit: `30ee1c5` (2026-05-22). Everything after that counts as V5.
 - ✅ Permanent `users.streak_best` that never resets, so badges survive a broken streak (`6d3b9f2`)
 - ✅ End-to-end badge milestone test (`npm run test:streak-trigger`), badge preview moved behind admin (`7ca8d22`)
 - ✅ Current streak counter with progress to the next badge (`a308549`)
+- ✅ Gacha-pull reveal overlay when a new badge unlocks, tunable on `/admin/reveal` (see Pillar 2)
 
 **Homepage**
 - ✅ Status-first homepage for signed-in users (`87eb08d`)
@@ -78,20 +79,21 @@ Started when someone registered with `nogid52036@dosbee.com`, a known disposable
 
 ---
 
-## 3. Pillar 2: Streak badge unlock reveal
+## 3. Pillar 2: Streak badge unlock reveal ✅
 
-Badges unlock correctly today, but nothing tells the user. `POST /tracker/streak` already returns `streakBest` and the dashboard/home handlers ignore it, so a new badge only shows up if someone visits `/profile`.
+Badges used to unlock silently: `POST /tracker/streak` returned `streakBest` and nothing read it, so a new badge only showed up on `/profile`. Built in October 2026.
 
-**The vision: a gacha pull reveal.** When a tier unlocks, a centered overlay plays like a gold pull in WuWa or NIKKE: the screen dims, a streak of light, a burst in the tier's color (Iron grey up to Diamond), then the `PolyhedronBadge` spins in with the tier name and "N-day streak". Click or Esc to skip, and a simple fade for `prefers-reduced-motion`.
+**The reveal**
+- ✅ Plays right away when the last game of the day crosses a badge threshold. The screen dims, a light streak shoots in, a flash and shockwave, slowly turning rays, then the `PolyhedronBadge` whirls in with the tier name and "N-day streak". Confetti in the tier's colors.
+- ✅ One light streak per face of the tier's shape (Iron 4, Bronze 6, Silver 8, Gold 12, Platinum 20), read from the badge geometry. Diamond counts its star's 60 visible triangles. Gold and up also get a second ray layer and side confetti, and Diamond a second flash.
+- ✅ First click (or Esc/Space/Enter) skips to the final card, the next one closes it. There's also an X button. Reduced motion skips the effects and just fades the card in.
+- ✅ `/admin/reveal` preview: pick a tier and streak days, slow it down to 0.25×, force reduced motion, auto-loop. The timings are the `rv-*` block in `globals.css`.
 
-**Fallback if the full overlay is too much:** a corner toast, "New badge unlocked". The toast alone is the minimum notice. Clicking it opens a reveal page styled like a banner pull, loot box, or CS2 case opening. Watching it is optional.
-
-**Implementation notes**
-- Have the API return `tierUnlocked` so the client doesn't need to diff. Read the old `streak_best` in the same statement (CTE) in `src/routes/tracker/tracker.ts`, compare with `highestEarnedTier()` from `src/constants/streakTiers.ts` (mirrored in `frontend/app/_lib/badges.ts`).
-- Trigger from the dashboard `handleToggleComplete` and home `handleToggle`, alongside the existing confetti.
-- Dedupe per tier in localStorage (same idea as `gdt_confetti_date`) so a refresh doesn't replay it.
-- **Anon users:** skipped. No badges for anon, they're the simple-tracking tier.
-- **Unverified accounts:** skipped too. Their badges are locked until they verify, so the reveal should fire on verification instead (or the next time they unlock a tier).
+**How it's triggered**
+- ✅ The API returns `tierUnlocked` (tier key or null), decided server-side from the old and new `streak_best` in one statement, so it's only set on the call that crosses the threshold.
+- ✅ Dashboard and home call the shared `BadgeRevealProvider`, with a localStorage backstop (`gdt_badge_revealed`) so the same tier never replays on that browser.
+- ✅ Anon users don't get badges, so no reveal. Unverified accounts get `tierUnlocked: null`, and the reveal plays when they verify instead (highest tier they've earned).
+- ✅ `npm run test:streak-trigger` asserts `tierUnlocked` for every tier, null on a repeat check, and null for an unverified user.
 
 ---
 
@@ -154,7 +156,11 @@ From a closed GitHub issue: WuWa has a mode that gives 160 Astrite and resets we
 
 **Per-page kintsugi backgrounds.** ✅ The generator itself is done. What's left: give login, register, forgot-password, reset-password and 404 their own generated SVGs, since they all share `kintsugi-veins-login-reg.svg` right now. A Web Worker to keep slider drags smooth is optional.
 
+**More Ads for anon users** in the my list page have some ads that suggestion to sign up to save and sync their list where every they go. also in that same page or in the main home screen page or both advertise the schedule tracker. maybe encourage streaks/badges.
+
 **Popular Games: count anon users, weighted.** Right now only accounts move the chart. `/games/popular` ranks by `games.add_count`, which only goes up on the logged-in add routes (`POST /tracker/games/:id` and `/bulk` in `src/routes/tracker/tracker.ts`). Anon adds stay in localStorage, and only reach the chart if that person later registers and their list gets bulk-synced. `add_count` also never goes down: removing a game or deleting an account doesn't subtract, so it's lifetime adds rather than current popularity. With a small user base, a few accounts adding and removing games reshuffled the top 10 a lot within about two months.
+
+**Leader board update** at the moment the leader board is at coming soon the issue is that that i need more users to be consistant with doing thier dailes. so a most 5 or less users are on the board. this is where you can break two leader boards a current streak and a historic best streak so that maybe like 20 users in the past have got a best streak of 1-20 days we have some activty. but we can toggle this in the admin to show both historic best streak and live current streaks. someone could have both spots of live and best like a person with 60 current would also be 60 at the best streak leaderboard.
 
 Plan: a weighted score that mixes both groups.
 - **Accounts:** rank by how many users track the game right now (`COUNT(*)` from `user_games`) instead of the lifetime `add_count`, so removals and deleted accounts drop out.

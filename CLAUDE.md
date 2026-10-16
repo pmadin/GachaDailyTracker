@@ -122,6 +122,7 @@ The entire UI uses a warm black-and-gold palette. **There is no purple/violet an
 - `/login`, `/register` — Auth forms with kintsugi vein SVG background (see below).
 - `/privacy-policy`, `/terms-of-service` — Static legal pages (prose rewrite in V3.5, no lists, gold headings/links).
 - `/admin/games` — Admin game management: search with 400ms debounce autocomplete, windowed Pagination component, sortable columns.
+- `/admin/reveal` — Badge reveal preview: tier, streak days, speed (0.25×–2×), forced reduced motion, auto-loop. No DB. Use it to tune the `rv-*` animation.
 - `/admin/analytics` — Stats/analytics panel: KPI row, signup/completion trends (range presets 7d/30d/90d/1y/all — not capped at 30 days like a free-tier traffic-analytics plan, since it's our own DB), top streaks, most-tracked games, region popularity (by each game's own server region), users-by-country (derived from timezone via `countries-and-timezones`, approximate). Charts are `recharts`; shared building blocks are `admin/_components/{RankedBarChart,TrendChart,StatTile,ChartCard}.tsx`. Every chart has a "View as table" twin. Single-hue gold marks throughout (all series are single-series magnitude/ordinal, never a multi-hue identity palette) — see `src/routes/admin/analytics.ts` for the region-grouping/country-mapping logic.
 
 **Key components:**
@@ -132,6 +133,7 @@ The entire UI uses a warm black-and-gold palette. **There is no purple/violet an
 - `Navbar` — logo links to `/`. Nav links: Games + My List. Username dropdown (click-outside via `useRef`) with Profile link + Sign out. Hamburger hidden at `xl:` breakpoint (1280px) — needed for 2K monitors at high DPI scaling where `lg:` (1024px) was insufficient.
 - `FeaturesSection` — three feature cards + notifications CTA strip at bottom. CTA uses `<Link href="/register">` (next/link imported).
 - `Footer` — privacy/ToS links, copyright, GPL-3.0 attribution.
+- `BadgeReveal` — gacha-pull overlay for a newly unlocked streak badge (dim, light streak, flash, rays, badge whirls in, tier name). Escalates by tier, click/Esc skips then closes, reduced motion just fades in. Timings are the `rv-*` block in `globals.css`, all scaled by `--rv-s`; it plays at `REVEAL_SPEED = 0.5` (exported from `BadgeReveal.tsx`, also the preview's default), so the real sequence is twice the written ms values. Mounted once by `_context/BadgeRevealContext.tsx` (`useBadgeReveal().reveal(tierKey, days)`), which dashboard/home call with `tierUnlocked` from `POST /tracker/streak`; the provider also plays it when an account becomes verified mid-session.
 - `MarketingHero` — hero section includes `— GACHA DAILY TRACKER —` mono label (font-jetbrains-mono, `var(--text2)`) between the badge pill and the h1 headline.
 
 **localStorage keys:**
@@ -141,6 +143,7 @@ The entire UI uses a warm black-and-gold palette. **There is no purple/violet an
 - `gdt_sort` — persisted dashboard sort preference (`'reset' | 'alpha' | 'custom'`); read on mount, written on every sort change
 - `gdt_streak` — anon streak `{ count, lastDate }` (ISO date string)
 - `gdt_confetti_date` — ISO date of last confetti fire (prevents re-trigger)
+- `gdt_badge_revealed` — `{ [userId]: days }` of the highest badge reveal already shown on this browser (backstop dedupe for `BadgeReveal`)
 
 **Env vars (frontend):**
 - `NEXT_PUBLIC_API_URL` — backend base URL (client + server)
@@ -201,7 +204,7 @@ export const metadata: Metadata = {
 **Routes** (all under `/gdt`):
 - Public: `/games`, `/games/servers/list`, `/games/popular?limit=N`, `/timezones`, `/health`, `/status`
 - Auth: `/auth/register`, `/auth/login`, `/auth/profile`, `/auth/update-password`, `/auth/update-email`, `/auth/account` (DELETE), `/auth/forgot-password` (POST), `/auth/reset-password/:token` (GET), `/auth/reset-password` (POST), `/auth/verify-email` (POST, JWT), `/auth/verify-email/resend` (POST, JWT)
-- Tracker (JWT): `/tracker/games` (GET — includes `streak` field), `/tracker/games/bulk` (POST), `/tracker/games/:id` (POST/DELETE), `/tracker/games/:id/complete` (POST/DELETE), `/tracker/streak` (POST — idempotent, atomic CASE update), `/tracker/order` (PUT — saves `display_order` via proper client transaction)
+- Tracker (JWT): `/tracker/games` (GET — includes `streak` field), `/tracker/games/bulk` (POST), `/tracker/games/:id` (POST/DELETE), `/tracker/games/:id/complete` (POST/DELETE), `/tracker/streak` (POST — idempotent, atomic CASE update; returns `streakBest` and `tierUnlocked`, the tier key only on the call that crosses a new threshold, null for unverified accounts), `/tracker/order` (PUT — saves `display_order` via proper client transaction)
 - Game mgmt (JWT): `/update/games/:id`, `/update/add/game`, `/update/delete/game/:id`, `/update/games/import`
 - Submissions: `/submissions` (POST — create suggestion, JWT), `/admin/submissions` (GET — list, role 3+), `/admin/submissions/:id` (PATCH — approve/reject, role 3+)
 - Admin (role 3+): `/admin/users/role/:username`, `/admin/users`, `/admin/users/search`

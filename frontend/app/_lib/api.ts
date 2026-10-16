@@ -1,3 +1,5 @@
+import type { StreakTier } from './badges';
+
 const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 
 export interface Game {
@@ -112,7 +114,16 @@ export async function fetchTrackerGames(token: string): Promise<{ games: Tracked
   return apiFetch('/gdt/tracker/games', { headers: authHeader(token) });
 }
 
-export async function checkStreak(token: string): Promise<{ streak: number; allComplete?: boolean; completed?: number; total?: number; message?: string }> {
+// tierUnlocked is set only on the call that crosses a new badge tier (verified accounts only).
+export async function checkStreak(token: string): Promise<{
+  streak: number;
+  streakBest?: number;
+  tierUnlocked?: StreakTier['key'] | null;
+  allComplete?: boolean;
+  completed?: number;
+  total?: number;
+  message?: string;
+}> {
   return apiFetch('/gdt/tracker/streak', { method: 'POST', headers: authHeader(token) });
 }
 

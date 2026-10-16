@@ -21,6 +21,7 @@ import {
   updateAnonStreak,
 } from './_lib/storage';
 import { useAuth } from './_context/AuthContext';
+import { useBadgeReveal } from './_context/BadgeRevealContext';
 import MarketingHero from './_components/MarketingHero';
 import EmptyDashboard from './_components/EmptyDashboard';
 import GamesTray, { type TrayGame } from './_components/GamesTray';
@@ -36,6 +37,7 @@ function todayISO(): string {
 
 export default function HomePage() {
   const { token, isLoading: authLoading } = useAuth();
+  const { reveal } = useBadgeReveal();
   const [myGames, setMyGames] = useState<TrayGame[]>([]);
   const [popular, setPopular] = useState<PopularGame[]>([]);
   const [myGamesLoading, setMyGamesLoading] = useState(true);
@@ -116,7 +118,8 @@ export default function HomePage() {
           checkStreak(token)
             .then(res => {
               setStreak(res.streak);
-              setStreakBest(prev => Math.max(prev ?? 0, res.streak));
+              setStreakBest(prev => Math.max(prev ?? 0, res.streakBest ?? res.streak));
+              if (res.tierUnlocked) reveal(res.tierUnlocked, res.streak);
             })
             .catch(() => {});
         } else {
@@ -131,7 +134,7 @@ export default function HomePage() {
         }
       }
     }
-  }, [token, myGames]);
+  }, [token, myGames, reveal]);
 
   const handleAddPopular = useCallback(async (game: PopularGame) => {
     if (token) {

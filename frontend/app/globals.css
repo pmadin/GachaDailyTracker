@@ -281,3 +281,247 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .deletion-banner::after { animation: none; display: none; }
 }
+
+/* ── Streak badge unlock reveal (BadgeReveal.tsx, tuned on /admin/reveal) ──
+   Every timing is multiplied by --rv-s (1 / speed). Users see it at REVEAL_SPEED = 0.5 in
+   BadgeReveal.tsx, so the real sequence runs twice as long as the ms values below. --rv-c1/--rv-c2 are the tier's dark/light colors.
+   One-shot entrance animations carry .rv-in so a skip can fast-forward just those; looping
+   parts (rays, halo, shimmer, badge spin) live on inner elements and keep running. */
+.rv-root {
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  cursor: pointer;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.rv-backdrop {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 50% 46%, color-mix(in srgb, var(--rv-c1) 22%, transparent) 0%, transparent 45%),
+    radial-gradient(ellipse at 50% 50%, rgba(13,11,8,0.94) 0%, rgba(4,3,2,0.98) 75%);
+  animation: rv-fade calc(400ms * var(--rv-s)) ease-out both;
+}
+
+/* Light streak: a line anchored at its right end on the center, rotated so its tail points
+   off-screen, then slid in along its own axis. */
+.rv-streak {
+  position: absolute;
+  top: 46%;
+  left: calc(50% - 70vmax);
+  width: 70vmax;
+  height: var(--rv-h, 3px);
+  margin-top: calc(var(--rv-h, 3px) / -2);
+  transform-origin: right center;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent 0%, color-mix(in srgb, var(--rv-c1) 60%, transparent) 55%, var(--rv-c2) 92%, #fffaf0 100%);
+  box-shadow: 0 0 10px var(--rv-c2), 0 0 28px color-mix(in srgb, var(--rv-c1) 70%, transparent);
+  opacity: 0;
+  animation: rv-streak calc(700ms * var(--rv-s)) cubic-bezier(.55,0,.85,.35) calc(var(--rv-d, 300ms) * var(--rv-s)) both;
+}
+@keyframes rv-streak {
+  0%   { opacity: 1; transform: rotate(var(--rv-angle, 135deg)) translateX(-110vmax); }
+  88%  { opacity: 1; transform: rotate(var(--rv-angle, 135deg)) translateX(0) scaleX(1); }
+  100% { opacity: 0; transform: rotate(var(--rv-angle, 135deg)) translateX(0) scaleX(0.05); }
+}
+
+.rv-flash {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(circle at 50% 46%, #fffaf0 0%, var(--rv-c2) 30%, color-mix(in srgb, var(--rv-c1) 40%, transparent) 65%, transparent 100%);
+  opacity: 0;
+  animation: rv-flash calc(450ms * var(--rv-s)) ease-out calc(var(--rv-d, 1000ms) * var(--rv-s)) both;
+}
+@keyframes rv-flash {
+  0%   { opacity: 0; }
+  18%  { opacity: 0.95; }
+  100% { opacity: 0; }
+}
+
+.rv-ring {
+  position: absolute;
+  top: 46%;
+  left: 50%;
+  width: 120px;
+  height: 120px;
+  margin: -60px 0 0 -60px;
+  border-radius: 50%;
+  border: 2px solid var(--rv-c2);
+  box-shadow: 0 0 24px var(--rv-c2), inset 0 0 24px color-mix(in srgb, var(--rv-c2) 50%, transparent);
+  opacity: 0;
+  animation: rv-ring calc(800ms * var(--rv-s)) cubic-bezier(.2,.7,.3,1) calc(1000ms * var(--rv-s)) both;
+}
+@keyframes rv-ring {
+  0%   { opacity: 1; transform: scale(0.2); }
+  100% { opacity: 0; transform: scale(7); }
+}
+
+/* Rays: the outer element fades and scales in once, the inner one rotates forever. */
+.rv-rays {
+  position: absolute;
+  top: 46%;
+  left: 50%;
+  width: 150vmax;
+  height: 150vmax;
+  margin: -75vmax 0 0 -75vmax;
+  pointer-events: none;
+  -webkit-mask-image: radial-gradient(circle, black 0%, rgba(0,0,0,0.5) 18%, transparent 42%);
+  mask-image: radial-gradient(circle, black 0%, rgba(0,0,0,0.5) 18%, transparent 42%);
+  animation: rv-rays-in calc(900ms * var(--rv-s)) ease-out calc(1050ms * var(--rv-s)) both;
+}
+@keyframes rv-rays-in {
+  from { opacity: 0; transform: scale(0.4); }
+  to   { opacity: 1; transform: scale(1); }
+}
+.rv-rays-spin {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: repeating-conic-gradient(from 0deg, color-mix(in srgb, var(--rv-c2) 30%, transparent) 0deg 5deg, transparent 5deg 22.5deg);
+  animation: rv-spin calc(40s * var(--rv-s)) linear infinite;
+}
+.rv-rays-spin.rv-rays-alt {
+  background: repeating-conic-gradient(from 7deg, color-mix(in srgb, var(--rv-c1) 28%, transparent) 0deg 3deg, transparent 3deg 15deg);
+  animation-duration: calc(60s * var(--rv-s));
+  animation-direction: reverse;
+}
+@keyframes rv-spin { to { transform: rotate(360deg); } }
+
+.rv-stage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-top: -8vh;
+  padding: 0 16px;
+  text-align: center;
+}
+
+.rv-halo {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 260%;
+  height: 260%;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--rv-c2) 45%, transparent) 0%, color-mix(in srgb, var(--rv-c1) 18%, transparent) 40%, transparent 68%);
+  animation: rv-halo calc(2.6s * var(--rv-s)) ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes rv-halo {
+  0%, 100% { opacity: 0.75; transform: translate(-50%, -50%) scale(0.95); }
+  50%      { opacity: 1;    transform: translate(-50%, -50%) scale(1.06); }
+}
+
+.rv-badge {
+  position: relative;
+  perspective: 900px;
+  animation: rv-pop calc(800ms * var(--rv-s)) cubic-bezier(.2,.9,.3,1.25) calc(1150ms * var(--rv-s)) both;
+}
+@keyframes rv-pop {
+  0%   { opacity: 0; transform: scale(0.2); }
+  60%  { opacity: 1; transform: scale(1.15); }
+  100% { opacity: 1; transform: scale(1); }
+}
+.rv-badge-whirl {
+  position: relative;
+  animation: rv-whirl calc(1200ms * var(--rv-s)) cubic-bezier(.15,.75,.3,1) calc(1150ms * var(--rv-s)) both;
+}
+@keyframes rv-whirl {
+  from { transform: rotateY(-720deg); }
+  to   { transform: rotateY(0deg); }
+}
+
+.rv-label {
+  margin-top: 36px;
+  font-family: var(--font-jetbrains-mono);
+  font-size: 11px;
+  letter-spacing: 0.3em;
+  color: var(--text2);
+  animation: rv-rise calc(500ms * var(--rv-s)) ease-out calc(2000ms * var(--rv-s)) both;
+}
+.rv-title {
+  margin-top: 10px;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: clamp(36px, 9vw, 64px);
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  animation: rv-rise-big calc(650ms * var(--rv-s)) cubic-bezier(.2,.9,.3,1.2) calc(2150ms * var(--rv-s)) both;
+}
+.rv-title-shimmer {
+  background: linear-gradient(90deg, var(--rv-c1), var(--rv-c2), #fffaf0, var(--rv-c2), var(--rv-c1));
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: gold-shimmer calc(4s * var(--rv-s)) linear infinite;
+}
+.rv-sub {
+  margin-top: 8px;
+  font-size: 15px;
+  color: var(--text2);
+  animation: rv-rise calc(500ms * var(--rv-s)) ease-out calc(2400ms * var(--rv-s)) both;
+}
+.rv-hint {
+  margin-top: 40px;
+  font-family: var(--font-jetbrains-mono);
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  color: var(--text3);
+  animation: rv-fade calc(600ms * var(--rv-s)) ease-out calc(3200ms * var(--rv-s)) both;
+}
+.rv-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text2);
+  border: 1px solid var(--border2);
+  background: rgba(13,11,8,0.6);
+  animation: rv-fade calc(300ms * var(--rv-s)) ease-out calc(400ms * var(--rv-s)) both;
+}
+.rv-close:hover, .rv-close:focus-visible { color: var(--gold-bright); border-color: var(--gold); outline: none; }
+
+@keyframes rv-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes rv-rise {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes rv-rise-big {
+  from { opacity: 0; transform: translateY(14px) scale(0.92); letter-spacing: 0.08em; }
+  to   { opacity: 1; transform: translateY(0) scale(1); letter-spacing: -0.02em; }
+}
+
+/* Skip: fast-forward the one-shot entrances to their end state. */
+.rv-root.rv-skip .rv-in {
+  animation-delay: 0s !important;
+  animation-duration: 1ms !important;
+}
+
+/* Reduced motion: no streak, flash, ring or rays; the final card just fades in. */
+.rv-root[data-reduced="true"] .rv-streak,
+.rv-root[data-reduced="true"] .rv-flash,
+.rv-root[data-reduced="true"] .rv-ring,
+.rv-root[data-reduced="true"] .rv-rays { display: none; }
+.rv-root[data-reduced="true"] .rv-in { animation: rv-fade 300ms ease-out both !important; }
+.rv-root[data-reduced="true"] .rv-halo,
+.rv-root[data-reduced="true"] .rv-title-shimmer { animation: none; }
+@media (prefers-reduced-motion: reduce) {
+  .rv-streak, .rv-flash, .rv-ring, .rv-rays { display: none; }
+  .rv-in { animation: rv-fade 300ms ease-out both !important; }
+  .rv-halo, .rv-title-shimmer { animation: none; }
+}

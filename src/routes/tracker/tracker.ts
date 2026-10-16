@@ -1,6 +1,7 @@
 import express, { Router } from 'express';
 import database from '../../config/database';
 import { authenticateToken } from '../../middleware/auth';
+import { highestEarnedTier } from '../../constants/streakTiers';
 
 const trackerRouter: Router = express.Router();
 
@@ -531,6 +532,12 @@ trackerRouter.delete('/games/:gameId/complete', async (req, res) => {
  *               properties:
  *                 streak:
  *                   type: integer
+ *                 streakBest:
+ *                   type: integer
+ *                 tierUnlocked:
+ *                   type: string
+ *                   nullable: true
+ *                   description: Badge tier key (iron…diamond) when this call crossed a new tier threshold. Always null for unverified accounts.
  *                 allComplete:
  *                   type: boolean
  *                 completed:
@@ -633,7 +640,12 @@ trackerRouter.post('/streak', async (req, res) => {
         // streak_count, and neither of those should ever touch streak_best — see their
         // comments). The streak_count CASE is repeated inline for the GREATEST computation
         // since a single UPDATE can't reference a sibling SET clause's new value.
+        // The prev CTE hands back the pre-update streak_best (and verification) from the same
+        // statement, so tierUnlocked below is decided server-side without a second read.
         const result = await database.query(`
+            WITH prev AS (
+                SELECT streak_best AS old_best, email_verified FROM users WHERE id = $1 FOR UPDATE
+            )
             UPDATE users
             SET
                 streak_count = CASE
@@ -653,16 +665,24 @@ trackerRouter.post('/streak', async (req, res) => {
                         ELSE 1
                     END
                 )
-            WHERE id = $1
-            RETURNING streak_count, streak_best
+            FROM prev
+            WHERE users.id = $1
+            RETURNING users.streak_count, users.streak_best, prev.old_best, prev.email_verified
         `, [userId]);
 
-        const newStreak = result.rows[0].streak_count;
-        const newBest = result.rows[0].streak_best;
+        const { streak_count: newStreak, streak_best: newBest, old_best: oldBest, email_verified } = result.rows[0];
+
+        // Set only on the call that crosses a new badge threshold, so the frontend reveal plays
+        // once. Unverified accounts have their badges locked, so they don't get one.
+        const newTier = highestEarnedTier(newBest);
+        const tierUnlocked = email_verified && newTier && newTier.key !== highestEarnedTier(oldBest)?.key
+            ? newTier.key
+            : null;
 
         res.json({
             streak: newStreak,
             streakBest: newBest,
+            tierUnlocked,
             allComplete: true,
             completed: completedCount,
             total: trackedCount,
