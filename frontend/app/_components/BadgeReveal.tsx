@@ -13,11 +13,13 @@ const DONE_AT = 3200;
 const CONFETTI_AT = 1050;
 
 // Light streaks: one per face of the tier's solid (tetrahedron 4, cube 6, octahedron 8,
-// dodecahedron 12, icosahedron 20, great stellated dodecahedron 12), read from the same
-// geometry the badge renders so the two never drift apart.
+// dodecahedron 12, icosahedron 20), read from the same geometry the badge renders so the two
+// never drift apart. The great stellated dodecahedron counts its visible triangles instead:
+// 12 pentagram faces x 5 star points = 60, so Diamond tops the list rather than landing
+// below Platinum.
 function faceCount(tier: StreakTier): number {
   return tier.solid === 'great-stellated-dodecahedron'
-    ? greatStellatedDodecahedronFor(64).length
+    ? greatStellatedDodecahedronFor(64).length * 5
     : solidFor(tier.solid as SolidName, 64).length;
 }
 
@@ -68,8 +70,8 @@ export default function BadgeReveal({
 
   const rank = STREAK_TIERS.findIndex(t => t.key === tier.key);
   const streaks = useMemo(() => buildStreaks(faceCount(tier)), [tier]);
-  // Thinner lines once there are a lot of them, so 20 streaks don't turn into a blob.
-  const streakHeight = streaks.length > 12 ? 2 : 3;
+  // Thinner lines once there are a lot of them, so 20 or 60 streaks don't turn into a blob.
+  const streakHeight = streaks.length > 30 ? 1.5 : streaks.length > 12 ? 2 : 3;
   const scale = 1 / speed;
 
   const reducedMotion = useCallback(

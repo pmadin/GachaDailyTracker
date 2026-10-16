@@ -85,7 +85,7 @@ Badges used to unlock silently: `POST /tracker/streak` returned `streakBest` and
 
 **The reveal**
 - ✅ Plays right away when the last game of the day crosses a badge threshold. The screen dims, a light streak shoots in, a flash and shockwave, slowly turning rays, then the `PolyhedronBadge` whirls in with the tier name and "N-day streak". Confetti in the tier's colors.
-- ✅ One light streak per face of the tier's shape (Iron 4, Bronze 6, Silver 8, Gold 12, Platinum 20, Diamond 12), read from the badge geometry. Gold and up also get a second ray layer and side confetti, and Diamond a second flash.
+- ✅ One light streak per face of the tier's shape (Iron 4, Bronze 6, Silver 8, Gold 12, Platinum 20), read from the badge geometry. Diamond counts its star's 60 visible triangles. Gold and up also get a second ray layer and side confetti, and Diamond a second flash.
 - ✅ First click (or Esc/Space/Enter) skips to the final card, the next one closes it. There's also an X button. Reduced motion skips the effects and just fades the card in.
 - ✅ `/admin/reveal` preview: pick a tier and streak days, slow it down to 0.25×, force reduced motion, auto-loop. The timings are the `rv-*` block in `globals.css`.
 
