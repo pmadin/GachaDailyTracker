@@ -117,7 +117,13 @@ Comes before weekly resets. 16 user-submitted games were sitting in `game_submis
 - ✅ The old `/admin/games/:id/icon` wrote GIFs to the dyno disk, which never reached users. It now uses the same pipeline, so "Icon" on `/admin/games` works for any game.
 - ✅ `npm run icon:process` runs the same pipeline on a file or folder.
 
-**Tests:** `npm run test:icons` (unit, in CI) and `npm run test:submission-review` (e2e against the local backend).
+**Reset times and servers, made clear** ✅ (came out of the first look at the 16, where "Asia/Manila 15:00" and "Europe/Moscow 23:00" were hard to compare with the catalog)
+- A reset is one moment, the same everywhere; `(timezone, daily_reset)` is just how it's written. A Global server still has one reset for everyone. The timezone only matters for DST, and the IANA zone handles that, so no DST question on the form.
+- ✅ Submit form defaults to the submitter's own timezone (was LA), shows a live "= 07:00 UTC · 12:00 AM your time" line to check against the in-game timer, and warns "Already tracked" while typing the name.
+- ✅ Server is a dropdown of 13 regions with plain labels ("Americas (North + South share one server)" vs "North America (US / Canada)"), stored as the catalog's existing values. "Other…" allows a short name (2–30 safe characters) and requires notes. The API enforces it (`src/constants/serverRegions.ts`), so "nutballsserver" or "Nutaku" is a 400.
+- ✅ Review panel shows every reset in UTC, marks similar games "same reset" / "1h later", and has "Same moment on:" buttons that rewrite the time onto UTC or a sibling server's clock. Server field is the same region list plus existing catalog spellings, with free text as a last resort.
+
+**Tests:** `npm run test:icons` (unit, in CI) and `npm run test:submission-review` (e2e against the local backend, also covers the server rules).
 
 **Then review the 16 together.** Check each one against official sources (reset time, server, timezone), fix what's wrong, add an icon, approve or reject.
 

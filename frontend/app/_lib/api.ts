@@ -470,7 +470,7 @@ export interface GameSubmission {
 
 export async function submitGame(
   token: string,
-  data: { name: string; server: string; timezone: string; daily_reset: string; notes?: string },
+  data: { name: string; server: string; server_other?: boolean; timezone: string; daily_reset: string; notes?: string },
 ): Promise<{ message: string; submission: { id: number; name: string; server: string; status: string } }> {
   return apiFetch('/gdt/submissions', {
     method: 'POST',

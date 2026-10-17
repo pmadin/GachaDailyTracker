@@ -344,6 +344,8 @@ heroku pg:psql -a gachadailytracker
 
 ## Key decisions / gotchas
 
+- **A reset is one global moment.** `(timezone, daily_reset)` is just how it's written: "Asia/Manila 15:00" and "Etc/UTC 07:00" are the same reset, and the UI converts to each viewer's clock. A Global server still has one reset for everyone. The zone only changes behavior with DST, so pick a DST-free zone (`Etc/UTC`, `Asia/Seoul`) unless the server's reset really shifts. Helpers in `_lib/resetTime.ts` (`resetUtc`, `resetDiffMinutes`); the submit form and ReviewPanel show resets in UTC so two spellings of one moment are easy to spot.
+- **Submission servers come from a fixed list** (`SUBMIT_SERVER_OPTIONS` in `_lib/servers.ts`, enforced by `src/constants/serverRegions.ts` on `POST /submissions`). Values match the catalog's existing spellings so the browse filters work. "Other" (`server_other: true`) allows 2–30 safe characters and requires notes. Admin approve stays free-form.
 - **Anon storage stores full Game objects**, not just IDs — avoids a pagination lookup problem where games beyond the first 48 results couldn't be found by ID alone.
 - **`AuthContext.isLoading`** flag prevents race conditions on mount; always gate effects on `!authLoading`.
 - **`apiFetch` header order matters** — `...init` must spread BEFORE `headers: { 'Content-Type', ...init?.headers }` so Content-Type is never overwritten by the caller's auth header object.

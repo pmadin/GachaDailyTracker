@@ -5,6 +5,7 @@ import TimezoneService from '../services/timezoneService';
 import { iconUpload } from '../middleware/iconUpload';
 import { IconError, parseIconFit, processIcon, saveGameIcon, type ProcessedIcon } from '../services/iconService';
 import { findSimilarGames } from '../services/similarGames';
+import { normalizeSubmitServer, SUBMIT_SERVER_VALUES } from '../constants/serverRegions';
 
 const submissionsRouter: Router = express.Router();
 const adminSubmissionsRouter: Router = express.Router();
@@ -59,7 +60,10 @@ async function findExistingGame(name: string, server: string) {
  *                 maxLength: 255
  *               server:
  *                 type: string
- *                 maxLength: 100
+ *                 description: One of Global, NA, South America, Americas, EU, Asia, Asia-Pacific, SEA, JP, KR, CN, TW, Oceania, or any short name when server_other is true
+ *               server_other:
+ *                 type: boolean
+ *                 description: The server isn't in the list. Requires notes explaining it.
  *               timezone:
  *                 type: string
  *               daily_reset:
@@ -83,10 +87,25 @@ submissionsRouter.post('/', async (req: Request, res: Response) => {
 
         const fields = validateGameFields(req.body);
         if ('error' in fields) return res.status(400).json({ error: fields.error });
-        const { name: cleanName, server: cleanServer, timezone, daily_reset } = fields;
+        const { name: cleanName, timezone, daily_reset } = fields;
 
         if (notes && typeof notes === 'string' && notes.length > 500) {
             return res.status(400).json({ error: 'Notes must be 500 characters or fewer' });
+        }
+
+        // Users pick from a fixed region list; "other" is allowed only with notes explaining it.
+        const isOther = req.body.server_other === true || req.body.server_other === 'true';
+        const cleanServer = normalizeSubmitServer(fields.server, isOther);
+        if (!cleanServer) {
+            return res.status(400).json({
+                error: isOther
+                    ? "Other server names must be 2–30 letters, numbers, spaces or & / ( ) - '"
+                    : 'Pick a server region from the list',
+            });
+        }
+        const hasNotes = typeof notes === 'string' && notes.trim().length > 0;
+        if (isOther && !(SUBMIT_SERVER_VALUES as readonly string[]).includes(cleanServer) && !hasNotes) {
+            return res.status(400).json({ error: 'Add a note explaining which server this is' });
         }
 
         if (await findExistingGame(cleanName, cleanServer)) {

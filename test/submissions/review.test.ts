@@ -167,6 +167,20 @@ async function main(): Promise<void> {
     const rejRow = (await db.query('SELECT status, game_id FROM game_submissions WHERE id = $1', [dupeId])).rows[0];
     check('reject: 200, status rejected, no game linked', rejected.status === 200 && rejRow.status === 'rejected' && rejRow.game_id === null);
 
+    // ── user submissions: server must come from the region list ─────────────────
+    const submit = (body: Record<string, unknown>) => call('POST', '/submissions', user.token,
+      { name: `${GAME_PREFIX} Server ${Math.random().toString(36).slice(2, 7)}`, timezone: 'Asia/Seoul', daily_reset: '06:00', ...body });
+    const junk = await submit({ server: 'nutballsserver' });
+    check('submit: made-up server is a 400', junk.status === 400, JSON.stringify(junk.json));
+    const listed = await submit({ server: 'na' });
+    check('submit: listed region (any case) is stored canonically', listed.status === 201 && listed.json.submission?.server === 'NA', JSON.stringify(listed.json));
+    const otherNoNotes = await submit({ server: 'Shard 7', server_other: true });
+    check('submit: other server without notes is a 400', otherNoNotes.status === 400, JSON.stringify(otherNoNotes.json));
+    const otherBad = await submit({ server: '<script>', server_other: true, notes: 'x' });
+    check('submit: other server with odd characters is a 400', otherBad.status === 400, JSON.stringify(otherBad.json));
+    const other = await submit({ server: 'Shard 7', server_other: true, notes: 'the EU shard' });
+    check('submit: other server with notes is a 201', other.status === 201 && other.json.submission?.server === 'Shard 7', JSON.stringify(other.json));
+
     // ── admin games icon upload (existing game) ───────────────────────────────────
     const reup = await call('POST', `/admin/games/${game?.id}/icon`, admin.token, iconForm('contain',
       await sharp({ create: { width: 50, height: 200, channels: 3, background: { r: 30, g: 200, b: 90 } } }).png().toBuffer()));
