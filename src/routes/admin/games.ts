@@ -5,10 +5,26 @@ import gameDataService from '../../services/gameDataService';
 import { iconUpload } from '../../middleware/iconUpload';
 import { IconError, parseIconFit, processIcon, saveGameIcon } from '../../services/iconService';
 import { runUpstreamSync, SyncGuardError } from '../../services/gameSyncService';
+import TimezoneService from '../../services/timezoneService';
 
 const adminGamesRouter: Router = express.Router();
 
-const TIME_RE = /^([01]?\d|2[0-3]):[0-5]\d$/;
+// HH:MM, plus an optional :SS since the DB hands times back as HH:MM:SS.
+const TIME_RE = /^([01]?\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/;
+
+/** Shape checks shared by add and edit. Only checks the fields that were sent. */
+function checkGameFields(b: Record<string, unknown>): string | null {
+  for (const key of ['name', 'server', 'timezone', 'daily_reset', 'icon_name'] as const) {
+    if (b[key] !== undefined && b[key] !== null && typeof b[key] !== 'string') return `${key} must be a string`;
+  }
+  const { name, server, timezone, daily_reset, icon_name } = b as Record<string, string | undefined>;
+  if (name !== undefined && (name.trim() === '' || name.length > 255)) return 'name must be 1–255 characters';
+  if (server !== undefined && (server.trim() === '' || server.length > 100)) return 'server must be 1–100 characters';
+  if (timezone !== undefined && !TimezoneService.isValidTimezone(timezone)) return `"${timezone}" is not a valid timezone`;
+  if (daily_reset !== undefined && !TIME_RE.test(daily_reset)) return 'daily_reset must be in HH:MM format';
+  if (icon_name && !/^[A-Za-z0-9 ._-]{1,100}$/.test(icon_name)) return 'icon_name may only contain letters, numbers, spaces, . _ -';
+  return null;
+}
 
 /**
  * @swagger
@@ -140,7 +156,7 @@ adminGamesRouter.get('/games', requireAdmin, async (req, res) => {
  *       201:
  *         description: Game created
  *       400:
- *         description: Missing required fields or invalid daily_reset format
+ *         description: Missing required fields, invalid timezone or invalid daily_reset format
  *       403:
  *         description: Forbidden
  *       409:
@@ -154,16 +170,15 @@ adminGamesRouter.post('/games', requireAdmin, async (req, res) => {
     if (!name || !server || !timezone || !daily_reset) {
       return res.status(400).json({ error: 'name, server, timezone, and daily_reset are required' });
     }
-    if (!TIME_RE.test(daily_reset)) {
-      return res.status(400).json({ error: 'daily_reset must be in HH:MM format' });
-    }
+    const invalid = checkGameFields(req.body);
+    if (invalid) return res.status(400).json({ error: invalid });
 
     const result = await database.query(
       `INSERT INTO games (name, server, timezone, daily_reset, icon_name, source)
        VALUES ($1, $2, $3, $4, $5, 'admin')
        ON CONFLICT (name, server) DO NOTHING
        RETURNING *`,
-      [name.trim(), server.trim(), timezone, daily_reset, icon_name ?? null]
+      [name.trim(), server.trim(), timezone, daily_reset, icon_name?.trim() || null]
     );
 
     if (result.rows.length === 0) {
@@ -212,7 +227,7 @@ adminGamesRouter.post('/games', requireAdmin, async (req, res) => {
  *       200:
  *         description: Game updated
  *       400:
- *         description: No fields provided or invalid daily_reset
+ *         description: No fields provided, invalid timezone or invalid daily_reset
  *       403:
  *         description: Forbidden
  *       404:
@@ -227,9 +242,8 @@ adminGamesRouter.patch('/games/:id', requireAdmin, async (req, res) => {
     if (!name && !server && !timezone && !daily_reset) {
       return res.status(400).json({ error: 'At least one field to update is required' });
     }
-    if (daily_reset && !TIME_RE.test(daily_reset)) {
-      return res.status(400).json({ error: 'daily_reset must be in HH:MM format' });
-    }
+    const invalid = checkGameFields({ name, server, timezone, daily_reset });
+    if (invalid) return res.status(400).json({ error: invalid });
 
     const fields: string[] = [];
     const values: unknown[] = [];
@@ -254,6 +268,9 @@ adminGamesRouter.patch('/games/:id', requireAdmin, async (req, res) => {
 
     res.json({ game: result.rows[0] });
   } catch (error: unknown) {
+    if ((error as { code?: string }).code === '23505') {
+      return res.status(409).json({ error: 'Another game already has that name and server' });
+    }
     const msg = error instanceof Error ? error.message : 'Unknown error';
     console.error('Admin update game error:', msg);
     res.status(500).json({ error: 'Failed to update game' });

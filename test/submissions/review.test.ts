@@ -181,6 +181,17 @@ async function main(): Promise<void> {
     const other = await submit({ server: 'Shard 7', server_other: true, notes: 'the EU shard' });
     check('submit: other server with notes is a 201', other.status === 201 && other.json.submission?.server === 'Shard 7', JSON.stringify(other.json));
 
+    // ── admin add / edit game validation ─────────────────────────────────────────
+    const badAdd = await call('POST', '/admin/games', admin.token, { name: `${GAME_PREFIX} Add`, server: 'NA', timezone: 'Mars/Olympus', daily_reset: '04:00' });
+    check('admin add: invalid timezone is a 400', badAdd.status === 400, JSON.stringify(badAdd.json));
+    const editSecs = await call('PATCH', `/admin/games/${game?.id}`, admin.token, { daily_reset: '06:30:00', timezone: 'Etc/UTC' });
+    check('admin edit: HH:MM:SS from the DB is accepted', editSecs.status === 200, JSON.stringify(editSecs.json));
+    const badEdit = await call('PATCH', `/admin/games/${game?.id}`, admin.token, { timezone: 'Not/AZone' });
+    check('admin edit: invalid timezone is a 400', badEdit.status === 400, JSON.stringify(badEdit.json));
+    const second = await call('POST', '/admin/games', admin.token, { name: `${GAME_PREFIX} Second`, server: 'NA', timezone: 'Etc/UTC', daily_reset: '04:00' });
+    const clash = await call('PATCH', `/admin/games/${second.json.game?.id}`, admin.token, { name: `${GAME_PREFIX} Fixed`, server: 'JP' });
+    check('admin edit: renaming onto an existing name + server is a 409', clash.status === 409, JSON.stringify(clash.json));
+
     // ── admin games icon upload (existing game) ───────────────────────────────────
     const reup = await call('POST', `/admin/games/${game?.id}/icon`, admin.token, iconForm('contain',
       await sharp({ create: { width: 50, height: 200, channels: 3, background: { r: 30, g: 200, b: 90 } } }).png().toBuffer()));

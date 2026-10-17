@@ -4,23 +4,20 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import GameCard from '../../_components/GameCard';
 import DashboardCard from '../../_components/DashboardCard';
 import { gameIconSrc } from '../../_lib/icons';
-import { displayServer, SUBMIT_SERVER_OPTIONS } from '../../_lib/servers';
-import { describeResetDiff, resetDiffMinutes, resetInZone, resetLocal, resetUtc, zoneCity } from '../../_lib/resetTime';
+import { describeResetDiff, resetDiffMinutes, resetUtc } from '../../_lib/resetTime';
+import {
+  adminInputStyle, focusOff, focusOn, ResetMoment, ResetTimeInput, ServerSelect, TimezoneSelect, useGameFieldData,
+} from '../_components/GameFieldControls';
 import {
   approveSubmission,
-  fetchServers,
   fetchSimilarGames,
-  fetchTimezones,
   previewIcon,
   type GameSubmission,
   type IconFit,
   type SimilarGame,
-  type TimezoneEntry,
 } from '../../_lib/api';
 
-const inputStyle = { border: '1px solid rgba(200,155,60,0.15)', background: 'var(--surface)' };
-const focusOn = (e: React.FocusEvent<HTMLElement>) => (e.currentTarget.style.borderColor = 'rgba(200,155,60,0.55)');
-const focusOff = (e: React.FocusEvent<HTMLElement>) => (e.currentTarget.style.borderColor = 'rgba(200,155,60,0.15)');
+const inputStyle = adminInputStyle;
 const noop = () => {};
 
 function Label({ children }: { children: React.ReactNode }) {
@@ -60,8 +57,7 @@ export default function ReviewPanel({
   };
   const [form, setForm] = useState(original);
   const [notes, setNotes] = useState('');
-  const [timezones, setTimezones] = useState<Record<string, TimezoneEntry[]>>({});
-  const [servers, setServers] = useState<string[]>([]);
+  const { timezones, servers } = useGameFieldData();
   const [similar, setSimilar] = useState<SimilarGame[] | null>(null);
 
   const [iconFile, setIconFile] = useState<File | null>(null);
@@ -73,11 +69,6 @@ export default function ReviewPanel({
 
   const [saving, setSaving] = useState<'active' | 'inactive' | null>(null);
   const [error, setError] = useState('');
-
-  useEffect(() => {
-    fetchTimezones().then(setTimezones).catch(() => {});
-    fetchServers().then(r => setServers(r.servers.map(s => s.server))).catch(() => {});
-  }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !saving) onClose(); };
@@ -118,28 +109,8 @@ export default function ReviewPanel({
     [similar, form.name, form.server],
   );
 
-  // The submitted timezone may not be in the curated list; keep it selectable.
-  const tzKnown = Object.values(timezones).some(list => list.some(t => t.timezone === form.timezone));
-
-  // Server: the submit-form regions, then other spellings already in the catalog, then free text.
-  const listedValues = useMemo(() => new Set(SUBMIT_SERVER_OPTIONS.map(o => o.value)), []);
-  const catalogServers = useMemo(() => servers.filter(s => !listedValues.has(s)).sort(), [servers, listedValues]);
-  const [serverOther, setServerOther] = useState(false);
-  const serverInList = listedValues.has(form.server) || catalogServers.includes(form.server);
-  const showServerInput = serverOther || (!serverInList && servers.length > 0);
-
-  // Same moment written on another clock: lets "Europe/Moscow 23:00" become "Etc/UTC 20:00".
-  const normalizeTo = (tz: string) => {
-    const t = resetInZone(form.timezone, form.daily_reset, tz);
-    if (t) setForm(f => ({ ...f, timezone: tz, daily_reset: t }));
-  };
   const submittedDiff = resetDiffMinutes(original, form);
-  const clockChoices = useMemo(() => {
-    const zones = new Set<string>(['Etc/UTC']);
-    similar?.forEach(g => zones.add(g.timezone));
-    zones.delete(form.timezone);
-    return [...zones].slice(0, 4);
-  }, [similar, form.timezone]);
+  const similarZones = useMemo(() => [...new Set(similar?.map(g => g.timezone) ?? [])], [similar]);
 
   const set = (key: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setForm(f => ({ ...f, [key]: e.target.value }));
@@ -228,80 +199,30 @@ export default function ReviewPanel({
 
             <div>
               <Label>Server</Label>
-              <select
-                value={showServerInput ? '__other__' : form.server}
-                onChange={e => {
-                  if (e.target.value === '__other__') { setServerOther(true); return; }
-                  setServerOther(false);
-                  setForm(f => ({ ...f, server: e.target.value }));
-                }}
-                className="w-full rounded-lg px-3 py-2 text-sm text-white outline-none" style={inputStyle} onFocus={focusOn} onBlur={focusOff}>
-                <optgroup label="Regions" style={{ background: 'var(--bg2)' }}>
-                  {SUBMIT_SERVER_OPTIONS.map(o => <option key={o.value} value={o.value} style={{ background: 'var(--bg2)' }}>{o.label}</option>)}
-                </optgroup>
-                {catalogServers.length > 0 && (
-                  <optgroup label="Other spellings in the catalog" style={{ background: 'var(--bg2)' }}>
-                    {catalogServers.map(s => <option key={s} value={s} style={{ background: 'var(--bg2)' }}>{s}</option>)}
-                  </optgroup>
-                )}
-                <option value="__other__" style={{ background: 'var(--bg2)' }}>Type a new one…</option>
-              </select>
-              {showServerInput && (
-                <input value={form.server} onChange={set('server')} maxLength={100} placeholder="New server name"
-                  className="mt-2 w-full rounded-lg px-3 py-2 text-sm text-white outline-none" style={inputStyle} onFocus={focusOn} onBlur={focusOff} />
-              )}
-              <p className="mt-1 text-xs" style={{ color: 'var(--text3)' }}>
-                Shows as <span style={{ color: 'var(--text2)' }}>{displayServer(form.server.trim() || '—')}</span>.
-                {showServerInput && ' Not a listed region: prefer one of the list where it fits.'}
-              </p>
+              <ServerSelect value={form.server} onChange={v => setForm(f => ({ ...f, server: v }))} servers={servers} />
               <Original value={original.server} current={form.server} />
             </div>
 
             <div className="grid gap-4 sm:grid-cols-[1fr_auto]">
               <div>
                 <Label>Timezone</Label>
-                <select value={form.timezone} onChange={set('timezone')}
-                  className="w-full rounded-lg px-3 py-2 text-sm text-white outline-none" style={inputStyle} onFocus={focusOn} onBlur={focusOff}>
-                  {!tzKnown && <option value={form.timezone}>{form.timezone}</option>}
-                  {Object.entries(timezones).map(([region, entries]) => (
-                    <optgroup key={region} label={region} style={{ background: 'var(--bg2)' }}>
-                      {entries.map(t => (
-                        <option key={t.timezone} value={t.timezone} style={{ background: 'var(--bg2)' }}>
-                          {t.label} ({t.offset})
-                        </option>
-                      ))}
-                    </optgroup>
-                  ))}
-                </select>
+                <TimezoneSelect value={form.timezone} onChange={v => setForm(f => ({ ...f, timezone: v }))} timezones={timezones} />
                 <Original value={original.timezone} current={form.timezone} />
               </div>
               <div>
                 <Label>Daily reset</Label>
-                <input type="time" value={form.daily_reset} onChange={set('daily_reset')}
-                  className="rounded-lg px-3 py-2 text-sm text-white outline-none [color-scheme:dark]" style={inputStyle} onFocus={focusOn} onBlur={focusOff} />
+                <ResetTimeInput value={form.daily_reset} onChange={v => setForm(f => ({ ...f, daily_reset: v }))} />
                 <Original value={original.daily_reset} current={form.daily_reset} />
               </div>
             </div>
             <div className="-mt-2 space-y-1.5">
-              <p className="font-mono text-xs" style={{ color: 'var(--gold-bright)' }}>
-                = {resetUtc(form.timezone, form.daily_reset)}
-                {resetLocal(form.timezone, form.daily_reset) && ` · ${resetLocal(form.timezone, form.daily_reset)} your time`}
-              </p>
+              <ResetMoment timezone={form.timezone} dailyReset={form.daily_reset} zones={similarZones}
+                onRewrite={(timezone, daily_reset) => setForm(f => ({ ...f, timezone, daily_reset }))} />
               {submittedDiff !== null && submittedDiff !== 0 && (
                 <p className="text-xs" style={{ color: 'var(--text3)' }}>
                   Submitted moment: {resetUtc(original.timezone, original.daily_reset)} ({describeResetDiff(-submittedDiff)} than the edit)
                 </p>
               )}
-              <div className="flex flex-wrap items-center gap-1.5 text-xs" style={{ color: 'var(--text3)' }}>
-                <span>Same moment on:</span>
-                {clockChoices.map(tz => (
-                  <button key={tz} type="button" onClick={() => normalizeTo(tz)}
-                    title={`Rewrite as ${tz} ${resetInZone(form.timezone, form.daily_reset, tz) ?? ''}`}
-                    className="rounded border border-[rgba(200,155,60,0.15)] px-2 py-0.5 text-[#9a8570] hover:text-[#f0ede8]">
-                    {zoneCity(tz)} {resetInZone(form.timezone, form.daily_reset, tz)}
-                  </button>
-                ))}
-              </div>
             </div>
 
             {/* Icon */}

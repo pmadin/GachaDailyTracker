@@ -18,6 +18,9 @@ import {
   type GamePayload,
 } from '../../_lib/api';
 import SubmissionsBadge from '../_components/SubmissionsBadge';
+import {
+  adminInputStyle, focusOff, focusOn, ResetMoment, ResetTimeInput, ServerSelect, TimezoneSelect, useGameFieldData,
+} from '../_components/GameFieldControls';
 
 const PAGE_SIZE = 50;
 
@@ -126,19 +129,18 @@ function GameFormModal({
   onSave: (data: GamePayload) => Promise<void>;
   onClose: () => void;
 }) {
+  const { timezones, servers } = useGameFieldData();
   const [form, setForm] = useState({
     name: game?.name ?? '',
     server: game?.server ?? '',
-    timezone: game?.timezone ?? 'America/Los_Angeles',
-    daily_reset: game?.daily_reset ?? '04:00',
+    timezone: game?.timezone ?? 'Etc/UTC',
+    // The DB returns HH:MM:SS; the time input and the API both want HH:MM.
+    daily_reset: (game?.daily_reset ?? '04:00').slice(0, 5),
     icon_name: game?.icon_name ?? '',
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-
-  const field =
-    (key: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
-      setForm(f => ({ ...f, [key]: e.target.value }));
+  const set = <K extends keyof typeof form>(key: K) => (value: string) => setForm(f => ({ ...f, [key]: value }));
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -148,10 +150,10 @@ function GameFormModal({
       const payload: GamePayload = {
         name: form.name.trim(),
         server: form.server.trim(),
-        timezone: form.timezone.trim(),
-        daily_reset: form.daily_reset.trim(),
+        timezone: form.timezone,
+        daily_reset: form.daily_reset,
       };
-      if (form.icon_name.trim()) payload.icon_name = form.icon_name.trim();
+      if (!game && form.icon_name.trim()) payload.icon_name = form.icon_name.trim();
       await onSave(payload);
       onClose();
     } catch (err: unknown) {
@@ -160,36 +162,47 @@ function GameFormModal({
     }
   };
 
-  const fields: { label: string; key: keyof typeof form; placeholder: string; required: boolean }[] = [
-    { label: 'Name', key: 'name', placeholder: 'Genshin Impact', required: true },
-    { label: 'Server', key: 'server', placeholder: 'Global', required: true },
-    { label: 'Timezone', key: 'timezone', placeholder: 'America/Los_Angeles', required: true },
-    { label: 'Daily Reset (HH:MM)', key: 'daily_reset', placeholder: '04:00', required: true },
-    { label: 'Icon name (optional)', key: 'icon_name', placeholder: 'genshin-impact', required: false },
-  ];
+  const label = 'mb-1 block text-xs text-zinc-400';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div className="w-full max-w-md rounded-xl p-6" style={{ border: '1px solid rgba(200,155,60,0.15)', background: 'var(--bg2)' }}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/60 p-4">
+      <div className="my-auto w-full max-w-md rounded-xl p-6" style={{ border: '1px solid rgba(200,155,60,0.15)', background: 'var(--bg2)' }}>
         <h2 className="mb-5 text-base font-semibold text-white">
           {game ? 'Edit Game' : 'Add Game'}
         </h2>
         <form onSubmit={handleSubmit} className="space-y-3">
-          {fields.map(({ label, key, placeholder, required }) => (
-            <div key={key}>
-              <label className="mb-1 block text-xs text-zinc-400">{label}</label>
-              <input
-                value={form[key]}
-                onChange={field(key)}
-                required={required}
-                placeholder={placeholder}
-                className="w-full rounded-lg px-3 py-2 text-sm text-white outline-none"
-                style={{ border: '1px solid rgba(200,155,60,0.15)', background: 'var(--surface)' }}
-                onFocus={e => (e.currentTarget.style.borderColor = 'rgba(200,155,60,0.55)')}
-                onBlur={e => (e.currentTarget.style.borderColor = 'rgba(200,155,60,0.15)')}
-              />
+          <div>
+            <label className={label}>Name</label>
+            <input value={form.name} onChange={e => set('name')(e.target.value)} required maxLength={255} placeholder="Genshin Impact"
+              className="w-full rounded-lg px-3 py-2 text-sm text-white outline-none" style={adminInputStyle} onFocus={focusOn} onBlur={focusOff} />
+          </div>
+          <div>
+            <label className={label}>Server</label>
+            <ServerSelect value={form.server} onChange={set('server')} servers={servers} />
+          </div>
+          <div className="grid grid-cols-[1fr_auto] gap-2">
+            <div className="min-w-0">
+              <label className={label}>Timezone</label>
+              <TimezoneSelect value={form.timezone} onChange={set('timezone')} timezones={timezones} />
             </div>
-          ))}
+            <div>
+              <label className={label}>Daily reset</label>
+              <ResetTimeInput value={form.daily_reset} onChange={set('daily_reset')} />
+            </div>
+          </div>
+          <ResetMoment timezone={form.timezone} dailyReset={form.daily_reset}
+            onRewrite={(timezone, daily_reset) => setForm(f => ({ ...f, timezone, daily_reset }))} />
+          {!game && (
+            <div>
+              <label className={label}>Upstream icon file (optional)</label>
+              <input value={form.icon_name} onChange={e => set('icon_name')(e.target.value)} maxLength={100} pattern="[A-Za-z0-9 ._\-]+"
+                placeholder="genshin-impact"
+                className="w-full rounded-lg px-3 py-2 text-sm text-white outline-none" style={adminInputStyle} onFocus={focusOn} onBlur={focusOff} />
+              <p className="mt-1 text-xs" style={{ color: 'var(--text3)' }}>
+                Only for a Game-Time-Master icon name, without .gif. To upload your own image, add the game, then use Icon on its row.
+              </p>
+            </div>
+          )}
           {error && (
             <p className="rounded-lg bg-red-950 px-3 py-2 text-sm text-red-400">{error}</p>
           )}
