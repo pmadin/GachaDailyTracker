@@ -29,6 +29,8 @@ export default function SubmitGameModal({ token, onClose }: Props) {
     notes: '',
   });
   const [matches, setMatches] = useState<Game[]>([]);
+  const [otherTouched, setOtherTouched] = useState(false);
+  const [otherFocused, setOtherFocused] = useState(false);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchSeq = useRef(0);
   const [saving, setSaving] = useState(false);
@@ -62,7 +64,14 @@ export default function SubmitGameModal({ token, onClose }: Props) {
 
   const isOther = form.server === OTHER;
   const serverValue = isOther ? form.otherServer.trim() : form.server;
-  const otherInvalid = isOther && form.otherServer.trim() !== '' && !OTHER_SERVER_RE.test(form.otherServer.trim());
+  // Flag bad characters as you type, but only complain about length once you leave the field,
+  // so the box doesn't go red on the first letter.
+  const otherText = form.otherServer.trim();
+  const otherBadChars = /[^A-Za-z0-9 &/()'-]/.test(otherText);
+  const otherError = !isOther || otherText === '' ? ''
+    : otherBadChars ? "Only letters, numbers, spaces and & / ( ) - ' are allowed."
+    : otherTouched && !OTHER_SERVER_RE.test(otherText) ? 'Use 2–30 characters, starting with a letter or number.'
+    : '';
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -198,10 +207,20 @@ export default function SubmitGameModal({ token, onClose }: Props) {
                   maxLength={30}
                   placeholder="Server name as the game shows it"
                   className="mt-2 w-full rounded-lg px-3 py-2 text-sm text-white outline-none"
-                  style={{ ...inputStyle, ...(otherInvalid ? { borderColor: 'rgba(239,68,68,0.6)' } : {}) }}
-                  {...focus}
+                  aria-invalid={!!otherError}
+                  // Longhand border props only: mixing the `border` shorthand with a changing
+                  // borderColor is what React warned about.
+                  style={{
+                    background: 'var(--surface)',
+                    borderWidth: 1,
+                    borderStyle: 'solid',
+                    borderColor: otherError ? 'rgba(239,68,68,0.6)' : otherFocused ? 'rgba(200,155,60,0.55)' : 'rgba(200,155,60,0.15)',
+                  }}
+                  onFocus={() => setOtherFocused(true)}
+                  onBlur={() => { setOtherFocused(false); setOtherTouched(true); }}
                 />
               )}
+              {otherError && <p className="mt-1 text-[11px] text-red-400">{otherError}</p>}
               <p className={hint} style={{ color: 'var(--text3)' }}>
                 Pick a region, not the store or platform (Steam, Nutaku, Google Play). A Global server still has one reset time for everyone on it.
                 {isOther && ' For Other, please explain the server in the notes.'}
