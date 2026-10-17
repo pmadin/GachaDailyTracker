@@ -4,6 +4,7 @@ import { useEffect, useState, type CSSProperties } from 'react';
 import Link from 'next/link';
 import type { Schedule } from '../../_lib/api';
 import { timeToMinutes, formatTime } from '../../_lib/scheduleTime';
+import { gameIconSrc } from '../../_lib/icons';
 
 interface Props {
   /** null while loading (renders nothing). */
@@ -128,7 +129,7 @@ export default function TodayPlan({ schedules, hasAnySchedule }: Props) {
             >
               <div style={{ width: 36, height: 36, flexShrink: 0 }}>
                 <img
-                  src={s.icon_name ? `${process.env.NEXT_PUBLIC_ICONS_BASE_URL}/${s.icon_name}.gif` : '/placeholder.svg'}
+                  src={gameIconSrc(s.icon_name)}
                   alt=""
                   width={36}
                   height={36}

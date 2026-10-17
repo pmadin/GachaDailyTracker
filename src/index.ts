@@ -27,6 +27,7 @@ import { startEmailDigestCron } from './workers/emailDigestCron';
 import { startUnverifiedCleanupCron } from './workers/unverifiedCleanupCron';
 import passwordResetRouter from './routes/auth/passwordReset';
 import scheduleRouter from './routes/schedule';
+import { iconsRouter } from './routes/icons';
 
 // Load environment variables - try multiple file names
 dotenv.config({ path: '.env.local' });
@@ -142,6 +143,7 @@ app.use('/gdt/api-docs', swaggerUi.serve, swaggerUi.setup(specs, swaggerOptions)
 // Routes
 app.use('/gdt/games', gameRoutes);
 app.use('/gdt/timezones', timezoneRoutes);
+app.use('/gdt/icons', iconsRouter);
 app.use('/gdt/auth', authRoutes);
 app.use('/gdt/auth', passwordResetRouter);
 app.use('/gdt/admin', roleRouter);

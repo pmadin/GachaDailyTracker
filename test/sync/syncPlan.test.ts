@@ -139,6 +139,18 @@ try {
   check('computeSyncPlan does not mutate its input', JSON.stringify(rows) === snapshot);
 }
 
+// 14. an admin-uploaded custom icon is never replaced by upstream's icon
+{
+  const rows = base.map(r => (r.id === 1 ? { ...r, icon_name: 'custom/1-abc123def0' } : r));
+  const ups = baseUp.map((u, i) => (i === 0 ? { ...u, icon: 'upstream-g0' } : u));
+  const p = computeSyncPlan(rows, ups, {});
+  check('custom icon vs a different upstream icon => no icon change planned', !p.toUpdate.some(u => u.id === 1));
+  const both = computeSyncPlan(rows, ups.map((u, i) => (i === 0 ? { ...u, dailyReset: '05:00' } : u)), {});
+  const u1 = both.toUpdate.find(u => u.id === 1);
+  check('other changes on a custom-icon game still apply, without an icon change',
+    !!u1 && u1.changes.some(c => c.startsWith('reset')) && !u1.changes.some(c => c.startsWith('icon')));
+}
+
 if (failures > 0) {
   console.error(`\n${failures} FAILURE(S)`);
   process.exit(1);

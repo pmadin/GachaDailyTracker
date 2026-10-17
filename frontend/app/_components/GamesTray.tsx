@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { getNextResetMs, msToCountdown, formatCountdown } from '../_lib/countdown';
+import { gameIconSrc } from '../_lib/icons';
 
 export interface TrayGame {
   id: number;
@@ -278,7 +279,7 @@ function GameCard({
       {/* Icon with done badge */}
       <div style={{ position: 'relative', width: 56, height: 56, flexShrink: 0 }}>
         <img
-          src={game.icon_name ? `${process.env.NEXT_PUBLIC_ICONS_BASE_URL}/${game.icon_name}.gif` : '/placeholder.svg'}
+          src={gameIconSrc(game.icon_name)}
           alt=""
           width={56}
           height={56}

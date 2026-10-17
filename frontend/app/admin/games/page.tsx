@@ -461,7 +461,7 @@ export default function AdminGamesPage() {
       <input
         ref={iconInputRef}
         type="file"
-        accept=".gif"
+        accept="image/png,image/jpeg,image/webp,image/gif"
         className="hidden"
         onChange={handleIconFileChange}
       />
@@ -512,7 +512,7 @@ export default function AdminGamesPage() {
           </button>
         </div>
         <p className="mt-2 text-xs text-zinc-600">
-          Icons are served directly from the Game-Time-Master repository. Use &quot;Verify Icons&quot; to check which games are missing icon references in the database.
+          Upstream icons come from the Game-Time-Master repository. &quot;Icon&quot; on a row uploads a custom one (stored in our DB, center-cropped to 96×96) that upstream syncs never replace. Use &quot;Verify Icons&quot; to find active games with no icon.
         </p>
         {importResult && (
           <p className={`mt-2 text-xs ${importResult.startsWith('Error') ? 'text-red-400' : 'text-zinc-400'}`}>{importResult}</p>
@@ -684,7 +684,7 @@ export default function AdminGamesPage() {
                           iconInputRef.current?.click();
                         }}
                         className="rounded px-2 py-1 text-xs text-[#9a8570] transition-colors hover:bg-[#18140d] hover:text-[#f0ede8]"
-                        title="Upload icon (.gif, 96×96)"
+                        title="Upload a custom icon (PNG, JPEG, WebP or GIF, up to 2 MB; center-cropped to 96×96)"
                       >
                         Icon
                       </button>

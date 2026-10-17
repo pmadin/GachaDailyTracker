@@ -7,9 +7,10 @@ import SortIcon, { type SortDir } from '../../_components/SortIcon';
 import { sortRows } from '../../_lib/sort';
 import {
   fetchAdminSubmissions,
-  reviewSubmission,
+  rejectSubmission,
   type GameSubmission,
 } from '../../_lib/api';
+import ReviewPanel from './ReviewPanel';
 
 const PAGE_SIZE = 20;
 
@@ -37,15 +38,13 @@ function formatDate(iso: string) {
   });
 }
 
-// ─── Review Modal ─────────────────────────────────────────────────────────────
-function ReviewModal({
+// ─── Reject Modal (approving opens the full ReviewPanel instead) ──────────────
+function RejectModal({
   submission,
-  action,
   onConfirm,
   onClose,
 }: {
   submission: GameSubmission;
-  action: 'approve' | 'reject';
   onConfirm: (notes: string) => Promise<void>;
   onClose: () => void;
 }) {
@@ -65,7 +64,6 @@ function ReviewModal({
     }
   };
 
-  const isApprove = action === 'approve';
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
@@ -73,9 +71,7 @@ function ReviewModal({
         className="w-full max-w-sm rounded-xl p-6"
         style={{ border: '1px solid rgba(200,155,60,0.15)', background: 'var(--bg2)' }}
       >
-        <h2 className={`mb-1 text-base font-semibold ${isApprove ? 'text-white' : 'text-red-400'}`}>
-          {isApprove ? 'Approve submission?' : 'Reject submission?'}
-        </h2>
+        <h2 className="mb-1 text-base font-semibold text-red-400">Reject submission?</h2>
         <p className="mb-4 text-sm text-zinc-400">
           <span className="text-white">{submission.name}</span>
           <span className="text-zinc-500"> · {submission.server}</span>
@@ -88,7 +84,7 @@ function ReviewModal({
             <input
               value={notes}
               onChange={e => setNotes(e.target.value)}
-              placeholder={isApprove ? 'Any notes for the record…' : 'Reason for rejection…'}
+              placeholder="Reason for rejection…"
               className="w-full rounded-lg px-3 py-2 text-sm text-white outline-none"
               style={{ border: '1px solid rgba(200,155,60,0.15)', background: 'var(--surface)' }}
               onFocus={e => (e.currentTarget.style.borderColor = 'rgba(200,155,60,0.55)')}
@@ -109,15 +105,9 @@ function ReviewModal({
             <button
               type="submit"
               disabled={saving}
-              className={`flex-1 rounded-lg py-2 text-sm font-medium disabled:opacity-50 ${
-                isApprove
-                  ? 'bg-emerald-700 text-white hover:bg-emerald-600'
-                  : 'bg-red-700 text-white hover:bg-red-600'
-              }`}
+              className="flex-1 rounded-lg bg-red-700 py-2 text-sm font-medium text-white hover:bg-red-600 disabled:opacity-50"
             >
-              {saving
-                ? isApprove ? 'Approving…' : 'Rejecting…'
-                : isApprove ? 'Approve' : 'Reject'}
+              {saving ? 'Rejecting…' : 'Reject'}
             </button>
           </div>
         </form>
@@ -140,7 +130,6 @@ export default function AdminSubmissionsPage() {
 
   const [reviewTarget, setReviewTarget] = useState<{ sub: GameSubmission; action: 'approve' | 'reject' } | null>(null);
   const [lastActionMsg, setLastActionMsg] = useState('');
-  const [lastActionApproved, setLastActionApproved] = useState(false);
   const [expandedCell, setExpandedCell] = useState<{ id: number; field: 'notes' | 'review' } | null>(null);
 
   // Matches the server's default ORDER BY gs.created_at DESC so the table doesn't
@@ -197,15 +186,17 @@ export default function AdminSubmissionsPage() {
     if (statusFilter !== 'pending') loadPendingCount();
   }, [statusFilter, loadPendingCount]);
 
-  const handleReview = async (notes: string) => {
-    if (!token || !reviewTarget) return;
-    const { sub, action } = reviewTarget;
-    const res = await reviewSubmission(token, sub.id, action, notes || undefined);
+  const finishReview = async (message: string) => {
     setReviewTarget(null);
-    setLastActionMsg(res.message);
-    setLastActionApproved(action === 'approve');
+    setLastActionMsg(message);
     await load();
     await loadPendingCount();
+  };
+
+  const handleReject = async (notes: string) => {
+    if (!token || !reviewTarget) return;
+    const res = await rejectSubmission(token, reviewTarget.sub.id, notes || undefined);
+    await finishReview(res.message);
   };
 
   const totalPages = Math.ceil(total / PAGE_SIZE);
@@ -225,20 +216,9 @@ export default function AdminSubmissionsPage() {
 
       {/* Action result message */}
       {lastActionMsg && (
-        <div className="mb-4 space-y-2">
-          <p className="rounded-lg bg-emerald-950/60 px-4 py-2 text-sm text-emerald-400">
-            {lastActionMsg}
-          </p>
-          {lastActionApproved && (
-            <p className="rounded-lg px-4 py-2 text-sm text-zinc-400" style={{ border: '1px solid rgba(200,155,60,0.15)', background: 'var(--bg2)' }}>
-              Go to the{' '}
-              <a href="/admin/games" className="underline" style={{ color: 'var(--gold)' }}>
-                Games panel
-              </a>{' '}
-              to activate it when ready.
-            </p>
-          )}
-        </div>
+        <p className="mb-4 rounded-lg bg-emerald-950/60 px-4 py-2 text-sm text-emerald-400">
+          {lastActionMsg}
+        </p>
       )}
 
       {/* Filter tabs */}
@@ -325,6 +305,11 @@ export default function AdminSubmissionsPage() {
                 >
                   <td className="px-4 py-3">
                     <div className="font-medium text-white">{sub.name}</div>
+                    {sub.game_id != null && (
+                      <a href={`/admin/games?search=${encodeURIComponent(sub.name)}`} className="text-xs underline" style={{ color: 'var(--gold)' }}>
+                        game #{sub.game_id}
+                      </a>
+                    )}
                     {sub.status !== 'pending' && (
                       <span className={`mt-0.5 inline-block rounded px-1.5 py-0.5 text-xs font-medium ${STATUS_BADGE[sub.status]}`}>
                         {sub.status}
@@ -357,7 +342,7 @@ export default function AdminSubmissionsPage() {
                           onClick={() => { setLastActionMsg(''); setReviewTarget({ sub, action: 'approve' }); }}
                           className="rounded px-2 py-1 text-xs text-emerald-400 transition-colors hover:bg-emerald-950/60"
                         >
-                          Approve
+                          Review
                         </button>
                         <button
                           onClick={() => { setLastActionMsg(''); setReviewTarget({ sub, action: 'reject' }); }}
@@ -394,11 +379,18 @@ export default function AdminSubmissionsPage() {
 
       <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
 
-      {reviewTarget && (
-        <ReviewModal
+      {reviewTarget?.action === 'approve' && token && (
+        <ReviewPanel
+          token={token}
           submission={reviewTarget.sub}
-          action={reviewTarget.action}
-          onConfirm={handleReview}
+          onDone={finishReview}
+          onClose={() => setReviewTarget(null)}
+        />
+      )}
+      {reviewTarget?.action === 'reject' && (
+        <RejectModal
+          submission={reviewTarget.sub}
+          onConfirm={handleReject}
           onClose={() => setReviewTarget(null)}
         />
       )}

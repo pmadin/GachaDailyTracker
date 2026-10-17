@@ -72,6 +72,16 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json();
 }
 
+// Multipart variant of apiFetch: no JSON Content-Type, so the browser sets the form boundary.
+async function apiForm<T>(path: string, token: string, method: string, form: FormData): Promise<T> {
+  const res = await fetch(`${API}${path}`, { method, headers: authHeader(token), body: form });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw Object.assign(new Error(body.error ?? res.statusText), { status: res.status, body });
+  }
+  return res.json();
+}
+
 function authHeader(token: string) {
   return { Authorization: `Bearer ${token}` };
 }
@@ -410,19 +420,21 @@ export async function updateUserRole(
   });
 }
 
-export async function uploadGameIcon(token: string, gameId: number, file: File): Promise<{ icon_name: string }> {
+export type IconFit = 'cover' | 'contain';
+
+export async function uploadGameIcon(token: string, gameId: number, file: File, fit: IconFit = 'cover'): Promise<{ icon_name: string }> {
   const form = new FormData();
   form.append('icon', file);
-  const res = await fetch(`${API}/gdt/admin/games/${gameId}/icon`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}` },
-    body: form,
-  });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw Object.assign(new Error(body.error ?? res.statusText), { status: res.status });
-  }
-  return res.json();
+  form.append('fit', fit);
+  return apiForm(`/gdt/admin/games/${gameId}/icon`, token, 'POST', form);
+}
+
+/** Runs the real server-side icon pipeline without saving, for the review preview. */
+export async function previewIcon(token: string, file: File, fit: IconFit): Promise<{ data_url: string; bytes: number; animated: boolean }> {
+  const form = new FormData();
+  form.append('icon', file);
+  form.append('fit', fit);
+  return apiForm('/gdt/admin/icons/preview', token, 'POST', form);
 }
 
 // ─── Submissions ──────────────────────────────────────────────────────────────
@@ -452,6 +464,7 @@ export interface GameSubmission {
   reviewed_by_role_name: string | null;
   review_notes: string | null;
   reviewed_at: string | null;
+  game_id: number | null;
   created_at: string;
 }
 
@@ -719,15 +732,59 @@ export async function fetchWeekSchedule(
   return apiFetch('/gdt/schedule/week', { headers: authHeader(token) });
 }
 
-export async function reviewSubmission(
-  token: string,
-  id: number,
-  action: 'approve' | 'reject',
-  review_notes?: string,
-): Promise<{ message: string }> {
+export interface SubmissionEdits {
+  name: string;
+  server: string;
+  timezone: string;
+  daily_reset: string;
+  activate: boolean;
+  icon?: File | null;
+  fit?: IconFit;
+}
+
+export async function rejectSubmission(token: string, id: number, review_notes?: string): Promise<{ message: string }> {
   return apiFetch(`/gdt/admin/submissions/${id}`, {
     method: 'PATCH',
     headers: authHeader(token),
-    body: JSON.stringify({ action, review_notes }),
+    body: JSON.stringify({ action: 'reject', review_notes }),
   });
+}
+
+/** Approve with the admin's edited fields; multipart so an icon can ride along. */
+export async function approveSubmission(
+  token: string,
+  id: number,
+  edits: SubmissionEdits,
+  review_notes?: string,
+): Promise<{ message: string; game_id: number }> {
+  const form = new FormData();
+  form.append('action', 'approve');
+  form.append('name', edits.name);
+  form.append('server', edits.server);
+  form.append('timezone', edits.timezone);
+  form.append('daily_reset', edits.daily_reset);
+  form.append('activate', String(edits.activate));
+  if (review_notes) form.append('review_notes', review_notes);
+  if (edits.icon) {
+    form.append('icon', edits.icon);
+    form.append('fit', edits.fit ?? 'cover');
+  }
+  return apiForm(`/gdt/admin/submissions/${id}`, token, 'PATCH', form);
+}
+
+export interface SimilarGame {
+  id: number;
+  name: string;
+  server: string;
+  timezone: string;
+  daily_reset: string;
+  icon_name: string | null;
+  is_active: boolean;
+  source: string | null;
+  score: number;
+}
+
+export async function fetchSimilarGames(token: string, submissionId: number, name?: string): Promise<{ games: SimilarGame[] }> {
+  const q = name ? `?name=${encodeURIComponent(name)}` : '';
+  return apiFetch(`/gdt/admin/submissions/${submissionId}/similar${q}`, { headers: authHeader(token) });
 }

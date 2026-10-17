@@ -94,7 +94,7 @@ export async function runUpstreamSync(opts: { dryRun: boolean }): Promise<SyncRe
           `UPDATE games g SET
              timezone      = v.tz,
              daily_reset   = v.dr::time,
-             icon_name     = v.icon,
+             icon_name     = CASE WHEN g.icon_name LIKE 'custom/%' THEN g.icon_name ELSE v.icon END,
              source        = $5,
              is_active     = true,
              last_verified = CURRENT_TIMESTAMP
@@ -118,7 +118,7 @@ export async function runUpstreamSync(opts: { dryRun: boolean }): Promise<SyncRe
            ON CONFLICT (name, server) DO UPDATE SET
              timezone      = EXCLUDED.timezone,
              daily_reset   = EXCLUDED.daily_reset,
-             icon_name     = EXCLUDED.icon_name,
+             icon_name     = CASE WHEN games.icon_name LIKE 'custom/%' THEN games.icon_name ELSE EXCLUDED.icon_name END,
              source        = EXCLUDED.source,
              is_active     = true,
              last_verified = CURRENT_TIMESTAMP`,

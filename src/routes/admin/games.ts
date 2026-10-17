@@ -1,29 +1,14 @@
 import express, { Router } from 'express';
-import fs from 'fs';
-import path from 'path';
-import multer from 'multer';
-import sizeOf from 'image-size';
 import database from '../../config/database';
 import { requireAdmin, requireOwner } from '../../middleware/admin';
 import gameDataService from '../../services/gameDataService';
+import { iconUpload } from '../../middleware/iconUpload';
+import { IconError, parseIconFit, processIcon, saveGameIcon } from '../../services/iconService';
 import { runUpstreamSync, SyncGuardError } from '../../services/gameSyncService';
 
 const adminGamesRouter: Router = express.Router();
 
-const ICONS_DIR =
-  process.env.ICONS_DIR ?? path.join(process.cwd(), 'frontend', 'public', 'icons');
-
 const TIME_RE = /^([01]?\d|2[0-3]):[0-5]\d$/;
-
-// ─── multer for icon upload ───────────────────────────────────────────────────
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 512 * 1024 }, // 500 KB hard cap
-  fileFilter: (_req, file, cb) => {
-    if (file.mimetype === 'image/gif') return cb(null, true);
-    cb(new Error('Only GIF files are accepted'));
-  },
-});
 
 /**
  * @swagger
@@ -551,13 +536,63 @@ adminGamesRouter.post('/import/icons/patch', requireAdmin, async (req, res) => {
 
 /**
  * @swagger
- * /gdt/admin/games/{id}/icon:
+ * /gdt/admin/icons/preview:
  *   post:
- *     summary: Upload game icon (admin)
+ *     summary: Process an icon without saving it (admin)
  *     tags: [Admin]
  *     security:
  *       - bearerAuth: []
- *     description: Upload a custom icon GIF. Must be exactly 96×96 px and under 500 KB.
+ *     description: |
+ *       Runs the same validation and 96×96 WebP re-encode as a real upload and returns the
+ *       result as a data URL, so the admin can see exactly what will be stored. Nothing is saved.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               icon:
+ *                 type: string
+ *                 format: binary
+ *               fit:
+ *                 type: string
+ *                 enum: [cover, contain]
+ *     responses:
+ *       200:
+ *         description: "{ data_url, bytes, animated }"
+ *       400:
+ *         description: No file, unsupported type, or too large
+ */
+adminGamesRouter.post('/icons/preview', requireAdmin, iconUpload, async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  try {
+    const icon = await processIcon(req.file.buffer, parseIconFit(req.body.fit));
+    res.json({
+      data_url: `data:${icon.mime};base64,${icon.data.toString('base64')}`,
+      bytes: icon.data.length,
+      animated: icon.animated,
+    });
+  } catch (error: unknown) {
+    if (error instanceof IconError) return res.status(400).json({ error: error.message });
+    const msg = error instanceof Error ? error.message : 'Unknown error';
+    console.error('Icon preview error:', msg);
+    res.status(500).json({ error: 'Icon processing failed' });
+  }
+});
+
+/**
+ * @swagger
+ * /gdt/admin/games/{id}/icon:
+ *   post:
+ *     summary: Upload a custom game icon (admin)
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     description: |
+ *       PNG, JPEG, WebP or GIF up to 2 MB, checked from the file's bytes. Re-encoded to a
+ *       96×96 WebP (center-cropped with `fit=cover`, padded with `fit=contain`) and stored in
+ *       game_icons; the game's icon_name becomes `custom/<id>-<hash>`.
  *     parameters:
  *       - in: path
  *         name: id
@@ -574,75 +609,35 @@ adminGamesRouter.post('/import/icons/patch', requireAdmin, async (req, res) => {
  *               icon:
  *                 type: string
  *                 format: binary
+ *               fit:
+ *                 type: string
+ *                 enum: [cover, contain]
  *     responses:
  *       200:
  *         description: Icon uploaded
  *       400:
- *         description: No file, wrong format, or wrong dimensions
+ *         description: No file, unsupported type, or too large
  *       403:
  *         description: Forbidden
  *       404:
  *         description: Game not found
  */
-// ─── POST /admin/games/:id/icon ───────────────────────────────────────────────
-// Manual icon upload — must be a GIF at exactly 96×96 px
-adminGamesRouter.post(
-  '/games/:id/icon',
-  requireAdmin,
-  upload.single('icon'),
-  async (req, res) => {
-    try {
-      if (!req.file) {
-        return res.status(400).json({ error: 'No file uploaded' });
-      }
+adminGamesRouter.post('/games/:id/icon', requireAdmin, iconUpload, async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  try {
+    const gameId = parseInt(req.params.id);
+    const game = await database.query('SELECT id FROM games WHERE id = $1', [gameId]);
+    if (game.rows.length === 0) return res.status(404).json({ error: 'Game not found' });
 
-      // Validate magic bytes: GIF89a / GIF87a start with 47 49 46
-      const magic = req.file.buffer.slice(0, 3).toString('ascii');
-      if (magic !== 'GIF') {
-        return res.status(400).json({ error: 'File must be a GIF' });
-      }
-
-      // Validate dimensions
-      const dims = sizeOf(req.file.buffer);
-      if (dims.width !== 96 || dims.height !== 96) {
-        return res.status(400).json({
-          error: `Icon must be 96×96 px (got ${dims.width}×${dims.height})`,
-        });
-      }
-
-      // Fetch the game's current icon_name to determine the filename
-      const gameResult = await database.query(
-        'SELECT id, name, icon_name FROM games WHERE id = $1',
-        [req.params.id]
-      );
-
-      if (gameResult.rows.length === 0) {
-        return res.status(404).json({ error: 'Game not found' });
-      }
-
-      const game = gameResult.rows[0];
-
-      // Use existing icon_name or derive one from the game name
-      const iconName = game.icon_name ?? game.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-
-      fs.mkdirSync(ICONS_DIR, { recursive: true });
-      fs.writeFileSync(path.join(ICONS_DIR, `${iconName}.gif`), req.file.buffer);
-
-      // Update icon_name in DB if it wasn't set
-      if (!game.icon_name) {
-        await database.query(
-          'UPDATE games SET icon_name = $1 WHERE id = $2',
-          [iconName, game.id]
-        );
-      }
-
-      res.json({ message: 'Icon uploaded', icon_name: iconName });
-    } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : 'Unknown error';
-      console.error('Admin icon upload error:', msg);
-      res.status(500).json({ error: 'Icon upload failed', details: msg });
-    }
+    const icon = await processIcon(req.file.buffer, parseIconFit(req.body.fit));
+    const iconName = await saveGameIcon(database, gameId, icon, req.user!.userId);
+    res.json({ message: 'Icon uploaded', icon_name: iconName });
+  } catch (error: unknown) {
+    if (error instanceof IconError) return res.status(400).json({ error: error.message });
+    const msg = error instanceof Error ? error.message : 'Unknown error';
+    console.error('Admin icon upload error:', msg);
+    res.status(500).json({ error: 'Icon upload failed' });
   }
-);
+});
 
 export { adminGamesRouter };

@@ -121,7 +121,8 @@ The entire UI uses a warm black-and-gold palette. **There is no purple/violet an
 - `/profile` (`app/profile/page.tsx`) — Account info + delete account (client-side identifier validation, 403 → "Incorrect password").
 - `/login`, `/register` — Auth forms with kintsugi vein SVG background (see below).
 - `/privacy-policy`, `/terms-of-service` — Static legal pages (prose rewrite in V3.5, no lists, gold headings/links).
-- `/admin/games` — Admin game management: search with 400ms debounce autocomplete, windowed Pagination component, sortable columns.
+- `/admin/games` — Admin game management: search with 400ms debounce autocomplete, windowed Pagination component, sortable columns. "Icon" on a row uploads a custom icon.
+- `/admin/submissions` — "Review" opens `ReviewPanel.tsx`: edit name/server/timezone/reset (submitted values shown when changed), near-duplicate list, icon upload with Crop/Pad and the server's real output, live `GameCard` + `DashboardCard` preview (both take an `iconSrc` override for this), then "Approve & activate" or "Approve as inactive". Reject is a separate small modal.
 - `/admin/reveal` — Badge reveal preview: tier, streak days, speed (0.25×–2×), forced reduced motion, auto-loop. No DB. Use it to tune the `rv-*` animation.
 - `/admin/analytics` — Stats/analytics panel: KPI row, signup/completion trends (range presets 7d/30d/90d/1y/all — not capped at 30 days like a free-tier traffic-analytics plan, since it's our own DB), top streaks, most-tracked games, region popularity (by each game's own server region), users-by-country (derived from timezone via `countries-and-timezones`, approximate). Charts are `recharts`; shared building blocks are `admin/_components/{RankedBarChart,TrendChart,StatTile,ChartCard}.tsx`. Every chart has a "View as table" twin. Single-hue gold marks throughout (all series are single-series magnitude/ordinal, never a multi-hue identity palette) — see `src/routes/admin/analytics.ts` for the region-grouping/country-mapping logic.
 
@@ -149,7 +150,7 @@ The entire UI uses a warm black-and-gold palette. **There is no purple/violet an
 - `NEXT_PUBLIC_API_URL` — backend base URL (client + server)
 - `REGISTRATION_TOKEN` — server-only; never sent to browser
 
-**Icons:** 96×96 GIFs live in `frontend/public/icons/` (excluded from git via `.gitignore`). Run `node scripts/download-icons.js` to populate locally. `frontend/public/icons/placeholder.svg` and `frontend/public/placeholder.svg` are committed as fallback — kintsugi gold diamond gem (no text, no question mark).
+**Icons:** every icon `<img>` goes through `gameIconSrc(icon_name)` in `_lib/icons.ts`. Upstream icons are GIFs at `NEXT_PUBLIC_ICONS_BASE_URL` (the Game-Time-Master folder). Admin-uploaded icons are stored in the `game_icons` table (the Heroku dyno disk is wiped on restart) with `icon_name = 'custom/<gameId>-<hash>'`, served by the API at `/gdt/icons/custom/<gameId>-<hash>.webp` (immutable cache, `Cross-Origin-Resource-Policy: cross-origin` to get past helmet's default). Upstream sync never replaces a `custom/` icon. Legacy note: 96×96 GIFs live in `frontend/public/icons/` (excluded from git via `.gitignore`). Run `node scripts/download-icons.js` to populate locally. `frontend/public/icons/placeholder.svg` and `frontend/public/placeholder.svg` are committed as fallback — kintsugi gold diamond gem (no text, no question mark).
 
 ---
 
@@ -206,7 +207,8 @@ export const metadata: Metadata = {
 - Auth: `/auth/register`, `/auth/login`, `/auth/profile`, `/auth/update-password`, `/auth/update-email`, `/auth/account` (DELETE), `/auth/forgot-password` (POST), `/auth/reset-password/:token` (GET), `/auth/reset-password` (POST), `/auth/verify-email` (POST, JWT), `/auth/verify-email/resend` (POST, JWT)
 - Tracker (JWT): `/tracker/games` (GET — includes `streak` field), `/tracker/games/bulk` (POST), `/tracker/games/:id` (POST/DELETE), `/tracker/games/:id/complete` (POST/DELETE), `/tracker/streak` (POST — idempotent, atomic CASE update; returns `streakBest` and `tierUnlocked`, the tier key only on the call that crosses a new threshold, null for unverified accounts), `/tracker/order` (PUT — saves `display_order` via proper client transaction)
 - Game mgmt (JWT): `/update/games/:id`, `/update/add/game`, `/update/delete/game/:id`, `/update/games/import`
-- Submissions: `/submissions` (POST — create suggestion, JWT), `/admin/submissions` (GET — list, role 3+), `/admin/submissions/:id` (PATCH — approve/reject, role 3+)
+- Submissions: `/submissions` (POST — create suggestion, JWT), `/admin/submissions` (GET — list, role 3+), `/admin/submissions/:id` (PATCH — approve/reject, role 3+; approve takes edited name/server/timezone/daily_reset, `activate`, and an optional `icon` + `fit` as multipart, all in one transaction; an existing name+server is a 409 naming the game), `/admin/submissions/:id/similar` (GET — near-duplicate names, role 3+)
+- Icons: `/icons/custom/:gameId-:hash.webp` (GET, public), `/admin/icons/preview` (POST multipart, role 3+, processes without saving), `/admin/games/:id/icon` (POST multipart, role 3+). Uploads: PNG/JPEG/WebP/GIF only, type checked from the bytes, 2 MB cap, re-encoded by `sharp` to a 96×96 WebP (`fit=cover` crops, `contain` pads with `#0d0b08`), see `src/services/iconService.ts`
 - Admin (role 3+): `/admin/users/role/:username`, `/admin/users`, `/admin/users/search`
 - Analytics (role 3+): `/admin/analytics` (GET, `?days=7|30|90|365|all`)
 - Leaderboard: `/leaderboard/status` (public), `/leaderboard` (public, paginated), `/leaderboard/visibility` (GET/PATCH, JWT)
@@ -253,6 +255,8 @@ email_verification_codes — user_id, code_hash (HMAC, never the raw code), expi
 site_settings     — key/value admin toggles (leaderboard_enabled)
 play_schedules    — user_id, game_id, days_of_week SMALLINT[], window_start TIME, window_end TIME,
                     hook_notifications BOOLEAN (fires push at window_start instead of reset offset)
+game_icons        — game_id PK, data BYTEA (96x96 WebP), mime, hash, updated_by (admin-uploaded icons)
+game_submissions  — user suggestions; game_id links an approved one to the game it created
 ```
 
 Games use **soft-delete** (`is_active = false`). `UNIQUE(name, server)` prevents duplicates. All user FKs have `ON DELETE CASCADE`.
@@ -300,6 +304,10 @@ CREATE TABLE IF NOT EXISTS email_verification_codes (id SERIAL PRIMARY KEY, user
 CREATE INDEX IF NOT EXISTS idx_email_codes_user_id ON email_verification_codes(user_id);
 -- Signups unverified past this get auto-deleted (unverifiedCleanupCron). Existing rows stay NULL = never deleted.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verify_deadline TIMESTAMP;
+
+-- v5 custom icons + submission review (Pillar 3):
+CREATE TABLE IF NOT EXISTS game_icons (game_id INTEGER PRIMARY KEY REFERENCES games(id) ON DELETE CASCADE, data BYTEA NOT NULL, mime VARCHAR(50) NOT NULL, hash VARCHAR(16) NOT NULL, updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
+ALTER TABLE game_submissions ADD COLUMN IF NOT EXISTS game_id INTEGER REFERENCES games(id) ON DELETE SET NULL;
 ```
 
 ---
@@ -313,6 +321,9 @@ npm run dev          # Heroku DB (.env.development) — talks to PRODUCTION data
 npm run db-reset     # restart Docker postgres (postgres:17, matches Heroku PG 17)
 npm run check:schema # verify a DB has every table/column in 01-schema.sql (uses DATABASE_URL, or .env); Heroku runs this as the release phase
 npm run backup:pull  # capture a Heroku backup and download it to backups/gdt-YYYY-MM-DD.dump
+npm run test:icons   # icon processing + near-duplicate scoring unit tests (runs in CI)
+npm run test:submission-review  # e2e review flow vs a running local backend (needs SKIP_EMAIL_DOMAIN_CHECK=true)
+npm run icon:process -- <file|folder> [out] [--fit cover|contain]  # same 96x96 WebP pipeline as uploads, to disk
 
 # Realistic local data: back up prod (heroku pg:backups:capture + pg_dump -Fc into gitignored backups/),
 # then restore into Docker with pg_restore --no-owner --no-acl, skipping _heroku / EVENT TRIGGER /
