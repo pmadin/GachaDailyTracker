@@ -2,11 +2,42 @@ import express, { Request, Response, Router } from 'express';
 import database from '../config/database';
 import { requireAdmin, getRoleName } from '../middleware/admin';
 import TimezoneService from '../services/timezoneService';
+import { iconUpload } from '../middleware/iconUpload';
+import { IconError, parseIconFit, processIcon, saveGameIcon, type ProcessedIcon } from '../services/iconService';
+import { findSimilarGames } from '../services/similarGames';
+import { normalizeSubmitServer, SUBMIT_SERVER_VALUES } from '../constants/serverRegions';
 
 const submissionsRouter: Router = express.Router();
 const adminSubmissionsRouter: Router = express.Router();
 
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+interface GameFields { name: string; server: string; timezone: string; daily_reset: string }
+
+/** Shared by user submissions and the admin approve step. */
+function validateGameFields(input: Record<string, unknown>): GameFields | { error: string } {
+    const name = typeof input.name === 'string' ? input.name.trim() : '';
+    const server = typeof input.server === 'string' ? input.server.trim() : '';
+    const timezone = typeof input.timezone === 'string' ? input.timezone : '';
+    const daily_reset = typeof input.daily_reset === 'string' ? input.daily_reset : '';
+
+    if (!name || name.length > 255) return { error: 'Game name is required (1–255 characters)' };
+    if (!server || server.length > 100) return { error: 'Server is required (1–100 characters)' };
+    if (!timezone || !TimezoneService.isValidTimezone(timezone)) return { error: 'Valid timezone is required' };
+    if (!daily_reset || !TIME_RE.test(daily_reset)) return { error: 'Daily reset must be in HH:MM format' };
+    return { name, server, timezone, daily_reset };
+}
+
+/** Case-insensitive name + server match, the same rule users hit when submitting. */
+async function findExistingGame(name: string, server: string) {
+    const result = await database.query(
+        `SELECT id, name, server, is_active FROM games
+         WHERE LOWER(name) = LOWER($1) AND LOWER(server) = LOWER($2)
+         LIMIT 1`,
+        [name, server]
+    );
+    return result.rows[0] as { id: number; name: string; server: string; is_active: boolean } | undefined;
+}
 
 /**
  * @swagger
@@ -29,7 +60,10 @@ const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
  *                 maxLength: 255
  *               server:
  *                 type: string
- *                 maxLength: 100
+ *                 description: One of Global, NA, South America, Americas, EU, Asia, Asia-Pacific, SEA, JP, KR, CN, TW, Oceania, or any short name when server_other is true
+ *               server_other:
+ *                 type: boolean
+ *                 description: The server isn't in the list. Requires notes explaining it.
  *               timezone:
  *                 type: string
  *               daily_reset:
@@ -48,34 +82,33 @@ const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
  */
 submissionsRouter.post('/', async (req: Request, res: Response) => {
     try {
-        const { name, server, timezone, daily_reset, notes } = req.body;
+        const { notes } = req.body;
         const userId = req.user!.userId;
 
-        const cleanName   = typeof name   === 'string' ? name.trim()   : '';
-        const cleanServer = typeof server === 'string' ? server.trim() : '';
+        const fields = validateGameFields(req.body);
+        if ('error' in fields) return res.status(400).json({ error: fields.error });
+        const { name: cleanName, timezone, daily_reset } = fields;
 
-        if (!cleanName || cleanName.length > 255) {
-            return res.status(400).json({ error: 'Game name is required (1–255 characters)' });
-        }
-        if (!cleanServer || cleanServer.length > 100) {
-            return res.status(400).json({ error: 'Server is required (1–100 characters)' });
-        }
-        if (!timezone || !TimezoneService.isValidTimezone(timezone)) {
-            return res.status(400).json({ error: 'Valid timezone is required' });
-        }
-        if (!daily_reset || !TIME_RE.test(daily_reset)) {
-            return res.status(400).json({ error: 'Daily reset must be in HH:MM format' });
-        }
         if (notes && typeof notes === 'string' && notes.length > 500) {
             return res.status(400).json({ error: 'Notes must be 500 characters or fewer' });
         }
 
-        // Duplicate game check
-        const existing = await database.query(
-            'SELECT id FROM games WHERE LOWER(name) = LOWER($1) AND LOWER(server) = LOWER($2)',
-            [cleanName, cleanServer]
-        );
-        if (existing.rows.length > 0) {
+        // Users pick from a fixed region list; "other" is allowed only with notes explaining it.
+        const isOther = req.body.server_other === true || req.body.server_other === 'true';
+        const cleanServer = normalizeSubmitServer(fields.server, isOther);
+        if (!cleanServer) {
+            return res.status(400).json({
+                error: isOther
+                    ? "Other server names must be 2–30 letters, numbers, spaces or & / ( ) - '"
+                    : 'Pick a server region from the list',
+            });
+        }
+        const hasNotes = typeof notes === 'string' && notes.trim().length > 0;
+        if (isOther && !(SUBMIT_SERVER_VALUES as readonly string[]).includes(cleanServer) && !hasNotes) {
+            return res.status(400).json({ error: 'Add a note explaining which server this is' });
+        }
+
+        if (await findExistingGame(cleanName, cleanServer)) {
             return res.status(409).json({ error: 'This game already exists in the database' });
         }
 
@@ -201,12 +234,64 @@ adminSubmissionsRouter.get('/submissions', requireAdmin, async (req: Request, re
 
 /**
  * @swagger
+ * /gdt/admin/submissions/{id}/similar:
+ *   get:
+ *     summary: Existing games with a similar name (Admin Only)
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     description: |
+ *       Near-duplicate check for the review panel. Scores every game name against `name`
+ *       (defaults to the submitted name) and returns the closest few, active or not.
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: name
+ *         schema:
+ *           type: string
+ *         description: Name to compare instead of the submitted one (the admin's edited name)
+ *     responses:
+ *       200:
+ *         description: Similar games, best match first
+ *       404:
+ *         description: Submission not found
+ */
+adminSubmissionsRouter.get('/submissions/:id/similar', requireAdmin, async (req: Request, res: Response) => {
+    try {
+        const sub = await database.query('SELECT name FROM game_submissions WHERE id = $1', [parseInt(req.params.id)]);
+        if (sub.rows.length === 0) return res.status(404).json({ error: 'Submission not found' });
+
+        const name = typeof req.query.name === 'string' && req.query.name.trim()
+            ? req.query.name.trim()
+            : sub.rows[0].name;
+        const catalog = await database.query(
+            `SELECT id, name, server, timezone, daily_reset, icon_name, is_active, source FROM games`
+        );
+        res.json({ games: findSimilarGames(name, catalog.rows) });
+    } catch (error: unknown) {
+        const msg = error instanceof Error ? error.message : 'Unknown error';
+        console.error('Similar games error:', msg);
+        res.status(500).json({ error: 'Failed to look up similar games' });
+    }
+});
+
+/**
+ * @swagger
  * /gdt/admin/submissions/{id}:
  *   patch:
  *     summary: Approve or reject a game submission (Admin Only)
  *     tags: [Admin]
  *     security:
  *       - bearerAuth: []
+ *     description: |
+ *       Approve creates the game from the (optionally edited) fields, in one transaction with
+ *       the optional icon and the submission update. A game with the same name and server
+ *       (case-insensitive) is a 409 that names the existing game, never a silent no-op.
+ *       Send multipart/form-data to include an icon; JSON works for everything else.
  *     parameters:
  *       - in: path
  *         name: id
@@ -216,7 +301,7 @@ adminSubmissionsRouter.get('/submissions', requireAdmin, async (req: Request, re
  *     requestBody:
  *       required: true
  *       content:
- *         application/json:
+ *         multipart/form-data:
  *           schema:
  *             type: object
  *             required: [action]
@@ -226,63 +311,136 @@ adminSubmissionsRouter.get('/submissions', requireAdmin, async (req: Request, re
  *                 enum: [approve, reject]
  *               review_notes:
  *                 type: string
+ *               name:
+ *                 type: string
+ *                 description: Edited name (approve only; defaults to the submitted value)
+ *               server:
+ *                 type: string
+ *               timezone:
+ *                 type: string
+ *               daily_reset:
+ *                 type: string
+ *                 example: "04:00"
+ *               activate:
+ *                 type: boolean
+ *                 description: Make the game visible right away (default false)
+ *               fit:
+ *                 type: string
+ *                 enum: [cover, contain]
+ *               icon:
+ *                 type: string
+ *                 format: binary
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [action]
  *     responses:
  *       200:
  *         description: Submission reviewed successfully
  *       400:
- *         description: Invalid action or submission already reviewed
+ *         description: Invalid action/fields/icon, or submission already reviewed
  *       404:
  *         description: Submission not found
+ *       409:
+ *         description: A game with this name and server already exists
  */
-adminSubmissionsRouter.patch('/submissions/:id', requireAdmin, async (req: Request, res: Response) => {
+adminSubmissionsRouter.patch('/submissions/:id', requireAdmin, iconUpload, async (req: Request, res: Response) => {
+    const id = parseInt(req.params.id);
+    const { action, review_notes } = req.body;
+    const adminId = req.user!.userId;
+    const notes = typeof review_notes === 'string' ? review_notes.trim() || null : null;
+
+    if (!['approve', 'reject'].includes(action)) {
+        return res.status(400).json({ error: 'Action must be "approve" or "reject"' });
+    }
+
     try {
-        const id = parseInt(req.params.id);
-        const { action, review_notes } = req.body;
-        const adminId = req.user!.userId;
-
-        if (!['approve', 'reject'].includes(action)) {
-            return res.status(400).json({ error: 'Action must be "approve" or "reject"' });
-        }
-
-        const subResult = await database.query(
-            'SELECT * FROM game_submissions WHERE id = $1',
-            [id]
-        );
+        const subResult = await database.query('SELECT * FROM game_submissions WHERE id = $1', [id]);
         if (subResult.rows.length === 0) {
             return res.status(404).json({ error: 'Submission not found' });
         }
-
         const sub = subResult.rows[0];
         if (sub.status !== 'pending') {
             return res.status(400).json({ error: `Submission is already ${sub.status}` });
         }
 
-        const newStatus = action === 'approve' ? 'approved' : 'rejected';
-
-        await database.query(
-            `UPDATE game_submissions
-             SET status = $1, reviewed_by = $2, review_notes = $3, reviewed_at = CURRENT_TIMESTAMP
-             WHERE id = $4`,
-            [newStatus, adminId,
-             typeof review_notes === 'string' ? review_notes.trim() || null : null,
-             id]
-        );
-
-        if (action === 'approve') {
+        if (action === 'reject') {
             await database.query(
-                `INSERT INTO games (name, server, timezone, daily_reset, is_active, source)
-                 VALUES ($1, $2, $3, $4, false, 'user-submission')
-                 ON CONFLICT (name, server) DO NOTHING`,
-                [sub.name, sub.server, sub.timezone, sub.daily_reset]
+                `UPDATE game_submissions
+                 SET status = 'rejected', reviewed_by = $1, review_notes = $2, reviewed_at = CURRENT_TIMESTAMP
+                 WHERE id = $3`,
+                [adminId, notes, id]
             );
-            console.log(`✅ Submission #${id} approved by admin ${adminId}: "${sub.name}" (${sub.server})`);
-            return res.json({
-                message: 'Approved and added to games (inactive). Activate it in the Games panel.',
+            console.log(`❌ Submission #${id} rejected by admin ${adminId}: "${sub.name}" (${sub.server})`);
+            return res.json({ message: 'Submission rejected.' });
+        }
+
+        // Approve: the admin's edits win, the submitted values fill anything left out.
+        const fields = validateGameFields({
+            name: req.body.name ?? sub.name,
+            server: req.body.server ?? sub.server,
+            timezone: req.body.timezone ?? sub.timezone,
+            daily_reset: req.body.daily_reset ?? String(sub.daily_reset).slice(0, 5),
+        });
+        if ('error' in fields) return res.status(400).json({ error: fields.error });
+
+        const activate = req.body.activate === true || req.body.activate === 'true';
+
+        // Process the icon before touching the DB, so a bad file fails without side effects.
+        let icon: ProcessedIcon | null = null;
+        if (req.file) {
+            try {
+                icon = await processIcon(req.file.buffer, parseIconFit(req.body.fit));
+            } catch (err) {
+                if (err instanceof IconError) return res.status(400).json({ error: err.message });
+                throw err;
+            }
+        }
+
+        const dupe = await findExistingGame(fields.name, fields.server);
+        if (dupe) {
+            return res.status(409).json({
+                error: `"${dupe.name}" (${dupe.server}) already exists${dupe.is_active ? '' : ' (inactive)'}. Edit the name or server, or reject this as a duplicate.`,
+                existing_game: dupe,
             });
         }
 
-        console.log(`❌ Submission #${id} rejected by admin ${adminId}: "${sub.name}" (${sub.server})`);
-        res.json({ message: 'Submission rejected.' });
+        const client = await database.getClient();
+        try {
+            await client.query('BEGIN');
+            const gameResult = await client.query(
+                `INSERT INTO games (name, server, timezone, daily_reset, is_active, source)
+                 VALUES ($1, $2, $3, $4, $5, 'user-submission')
+                 RETURNING id`,
+                [fields.name, fields.server, fields.timezone, fields.daily_reset, activate]
+            );
+            const gameId: number = gameResult.rows[0].id;
+            if (icon) await saveGameIcon(client, gameId, icon, adminId);
+            await client.query(
+                `UPDATE game_submissions
+                 SET status = 'approved', reviewed_by = $1, review_notes = $2, reviewed_at = CURRENT_TIMESTAMP, game_id = $3
+                 WHERE id = $4`,
+                [adminId, notes, gameId, id]
+            );
+            await client.query('COMMIT');
+
+            console.log(`✅ Submission #${id} approved by admin ${adminId} as game ${gameId}: "${fields.name}" (${fields.server})${activate ? ', active' : ''}`);
+            return res.json({
+                message: activate
+                    ? `Approved. "${fields.name}" is live now.`
+                    : `Approved. "${fields.name}" was added as inactive; activate it in the Games panel when ready.`,
+                game_id: gameId,
+            });
+        } catch (err: unknown) {
+            await client.query('ROLLBACK');
+            // Lost a race with another insert of the same name/server.
+            if ((err as { code?: string }).code === '23505') {
+                return res.status(409).json({ error: 'A game with this name and server already exists' });
+            }
+            throw err;
+        } finally {
+            client.release();
+        }
     } catch (error: unknown) {
         const msg = error instanceof Error ? error.message : 'Unknown error';
         console.error('Submission review error:', msg);

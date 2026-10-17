@@ -2,6 +2,7 @@
 
 import type { Game } from '../_lib/api';
 import { displayServer } from '../_lib/servers';
+import { gameIconSrc } from '../_lib/icons';
 
 interface Props {
   game: Game;
@@ -9,6 +10,8 @@ interface Props {
   onAdd: (game: Game) => void;
   onRemove: (game: Game) => void;
   priority?: boolean;
+  /** Overrides the icon URL (admin submission preview shows an icon that isn't saved yet). */
+  iconSrc?: string;
 }
 
 function formatResetTime(dailyReset: string): string {
@@ -18,13 +21,13 @@ function formatResetTime(dailyReset: string): string {
   return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
 }
 
-export default function GameCard({ game, isTracked, onAdd, onRemove, priority }: Props) {
+export default function GameCard({ game, isTracked, onAdd, onRemove, priority, iconSrc }: Props) {
   return (
     <div className="kintsugi-card flex flex-col gap-3 rounded-xl p-4" style={{ border: '1px solid rgba(200,155,60,0.12)', background: 'var(--bg2)' }}>
       <div className="flex items-start gap-2">
         <div style={{ width: 36, height: 36, flexShrink: 0, display: 'block' }}>
           <img
-            src={game.icon_name ? `${process.env.NEXT_PUBLIC_ICONS_BASE_URL}/${game.icon_name}.gif` : '/placeholder.svg'}
+            src={iconSrc ?? gameIconSrc(game.icon_name)}
             alt=""
             width={36}
             height={36}

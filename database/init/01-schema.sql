@@ -101,6 +101,7 @@ CREATE TABLE game_submissions (
     reviewed_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
     review_notes    TEXT,
     reviewed_at     TIMESTAMP,
+    game_id         INTEGER REFERENCES games(id) ON DELETE SET NULL,
     created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT chk_status CHECK (status IN ('pending', 'approved', 'rejected'))
 );
@@ -149,6 +150,17 @@ CREATE TABLE play_schedules (
     created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(user_id, game_id)
+);
+
+-- Custom game icons uploaded by admins (re-encoded 96x96 WebP). Stored in the DB because the
+-- Heroku dyno filesystem is wiped on restart. games.icon_name = 'custom/<game_id>-<hash>'.
+CREATE TABLE game_icons (
+    game_id     INTEGER PRIMARY KEY REFERENCES games(id) ON DELETE CASCADE,
+    data        BYTEA NOT NULL,
+    mime        VARCHAR(50) NOT NULL,
+    hash        VARCHAR(16) NOT NULL,
+    updated_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Indexes for performance

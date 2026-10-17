@@ -180,7 +180,9 @@ export function computeSyncPlan(
     const changes: string[] = [];
     if (row.timezone !== g.timezone) changes.push(`timezone ${row.timezone} -> ${g.timezone}`);
     if (normTime(row.daily_reset) !== g.dailyReset) changes.push(`reset ${normTime(row.daily_reset)} -> ${g.dailyReset}`);
-    if ((row.icon_name ?? null) !== (g.icon ?? null)) changes.push(`icon ${row.icon_name ?? 'none'} -> ${g.icon ?? 'none'}`);
+    // A custom (admin-uploaded) icon always wins over upstream's; the sync SQL keeps it too.
+    const customIcon = (row.icon_name ?? '').startsWith('custom/');
+    if (!customIcon && (row.icon_name ?? null) !== (g.icon ?? null)) changes.push(`icon ${row.icon_name ?? 'none'} -> ${g.icon ?? 'none'}`);
     if (row.source !== MANAGED_SOURCE) changes.push(`source ${row.source ?? 'null'} -> ${MANAGED_SOURCE}`);
     const reactivated = !row.is_active;
     if (reactivated) changes.push('reactivated');

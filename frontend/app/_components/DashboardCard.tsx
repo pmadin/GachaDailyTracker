@@ -3,6 +3,7 @@
 import CountdownTimer from './CountdownTimer';
 import { displayServer } from '../_lib/servers';
 import { getLocalResetTime } from '../_lib/countdown';
+import { gameIconSrc } from '../_lib/icons';
 
 export interface DashboardGame {
   game_id: number;
@@ -24,6 +25,8 @@ interface Props {
   hasSchedule?: boolean;
   hookNotificationsActive?: boolean;
   dragHandle?: React.ReactNode;
+  /** Overrides the icon URL (admin submission preview shows an icon that isn't saved yet). */
+  iconSrc?: string;
 }
 
 const OFFSET_OPTIONS = [
@@ -43,7 +46,7 @@ const OFFSET_OPTIONS = [
   { value: 720, label: '12 hr' },
 ];
 
-export default function DashboardCard({ game, onToggleComplete, onRemove, onUpdateOffset, onSchedule, hasSchedule, hookNotificationsActive, dragHandle }: Props) {
+export default function DashboardCard({ game, onToggleComplete, onRemove, onUpdateOffset, onSchedule, hasSchedule, hookNotificationsActive, dragHandle, iconSrc }: Props) {
   const resetAt = game.completed_today ? null : getLocalResetTime(game.timezone, game.daily_reset);
 
   return (
@@ -70,7 +73,7 @@ export default function DashboardCard({ game, onToggleComplete, onRemove, onUpda
       </button>
 
       <img
-        src={game.icon_name ? `${process.env.NEXT_PUBLIC_ICONS_BASE_URL}/${game.icon_name}.gif` : '/placeholder.svg'}
+        src={iconSrc ?? gameIconSrc(game.icon_name)}
         alt=""
         width={34}
         height={34}

@@ -75,6 +75,10 @@ jobs:
       - name: "Unit tests: streak tiers"
         run: npm run test:streak
 
+      # Custom icon processing (sharp) and near-duplicate name scoring (no database or network needed)
+      - name: "Unit tests: icons + similar games"
+        run: npm run test:icons
+
       # Pure unit tests for the schema-file parser behind the Heroku release-phase check
       - name: "Unit tests: schema parser"
         run: npm run test:schema

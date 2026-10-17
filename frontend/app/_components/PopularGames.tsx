@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import type { PopularGame } from '../_lib/api';
 import ServerBadge from './ServerBadge';
+import { gameIconSrc } from '../_lib/icons';
 
 interface Props {
   games: PopularGame[];
@@ -100,7 +101,7 @@ function PopularRow({
       {/* Icon */}
       <div style={{ width: 44, height: 44, flexShrink: 0, display: 'block' }}>
         <img
-          src={game.icon_name ? `${process.env.NEXT_PUBLIC_ICONS_BASE_URL}/${game.icon_name}.gif` : '/placeholder.svg'}
+          src={gameIconSrc(game.icon_name)}
           alt=""
           width={44}
           height={44}

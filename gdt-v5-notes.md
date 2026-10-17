@@ -97,33 +97,35 @@ Badges used to unlock silently: `POST /tracker/streak` returned `streakBest` and
 
 ---
 
-## 4. Pillar 3: Game submissions revamp + review the 15 pending games
+## 4. Pillar 3: Game submissions revamp + review the pending games
 
-Comes before weekly resets. 15 user-submitted games are sitting in `game_submissions` unreviewed, and the admin page needs work before reviewing them makes sense.
+Comes before weekly resets. 16 user-submitted games were sitting in `game_submissions` unreviewed, and the admin page needed work before reviewing them made sense. Built in October 2026.
 
-**What "Approve" does today** (`PATCH /admin/submissions/:id` in `src/routes/submissions.ts`): marks the submission approved and inserts the game into `games` with `is_active = false`, `source = 'user-submission'` and no icon. If a game with the same name and server already exists, the insert silently does nothing. The admin then has to find it on `/admin/games` and activate it by hand. There's no way to fix typos before approving, no icon, and no preview.
+**What "Approve" used to do:** mark the submission approved and insert the game as inactive with no icon. A game with the same name and server silently did nothing, and the admin had to find it on `/admin/games` to activate it. No way to fix typos, no icon, no preview.
 
-**Icons.** Every icon `<img>` builds `${NEXT_PUBLIC_ICONS_BASE_URL}/${icon_name}.gif`, and that base URL is the Game-Time-Master GitHub folder. Submitted games aren't in that repo, so they need their own storage. That logic is copy-pasted in `GameCard`, `DashboardCard`, `GamesTray`, `PopularGames` and `home/TodayPlan`; replace those with one `gameIconSrc(game)` helper.
+**Review panel** ✅ ("Review" on `/admin/submissions`)
+- ✅ Edit name, server, timezone and daily reset before approving; the submitted value shows under any field you changed. Server field suggests existing spellings.
+- ✅ Similar games already in the catalog, as you type (name scoring in `src/services/similarGames.ts`, no Postgres extension). An exact name + server match is flagged and blocks approving.
+- ✅ Icon upload with Crop/Pad, previewed through the real server pipeline, plus a live `GameCard` and `DashboardCard` with the edited data.
+- ✅ "Approve & activate" or "Approve as inactive". One transaction creates the game, saves the icon and links the submission (`game_submissions.game_id`). A duplicate is now a 409 that names the existing game.
 
-**Where to store custom icons** (decide together):
-- **Postgres `bytea` (leaning this way).** Heroku's dyno filesystem is wiped on every restart, so "store it on Heroku" really means storing it in the DB. A 96×96 icon is about 5–15 KB, so even 50 of them is tiny. Admins can upload from the UI, the API serves them at something like `/gdt/icons/custom/:id` with long cache headers, and they're in the daily backups for free.
-- **Git repo** (`frontend/public/icons-custom/`). Simplest to serve through Vercel, but every icon needs a commit and a deploy, so no uploading from the admin page.
-- Vercel Blob also works but adds another service for a handful of files.
+**Custom icons** ✅
+- ✅ Stored in Postgres (`game_icons`, BYTEA), since the Heroku disk is wiped on restart. Served at `/gdt/icons/custom/<id>-<hash>.webp` with an immutable cache; the hash changes when the icon does.
+- ✅ `games.icon_name = 'custom/<id>-<hash>'`, and one `gameIconSrc()` helper replaced the five copy-pasted icon URLs, so no game query had to change.
+- ✅ Admins only. Type checked from the bytes (PNG, JPEG, WebP, GIF; no SVG), 2 MB cap, re-encoded with `sharp` to a 96×96 WebP, which strips metadata and anything hidden in the file. Animated GIFs stay animated.
+- ✅ Upstream sync never replaces a custom icon.
+- ✅ The old `/admin/games/:id/icon` wrote GIFs to the dyno disk, which never reached users. It now uses the same pipeline, so "Icon" on `/admin/games` works for any game.
+- ✅ `npm run icon:process` runs the same pipeline on a file or folder.
 
-**Upload rules**
-- Admins only (role 3+). Users can never upload files.
-- Still clean admin uploads: check the real file type from the bytes (PNG, JPEG, WebP, GIF; no SVG), cap the input size (~2 MB), then re-encode with `sharp`, which strips metadata and anything hidden in the file.
-- Resize to 96×96 to match the upstream icons, keeping the aspect ratio (pad to square, or center-crop; pick after trying a few).
-- Same processing as a CLI script (`scripts/process-icon.js`) for batch or local use.
+**Reset times and servers, made clear** ✅ (came out of the first look at the 16, where "Asia/Manila 15:00" and "Europe/Moscow 23:00" were hard to compare with the catalog)
+- A reset is one moment, the same everywhere; `(timezone, daily_reset)` is just how it's written. A Global server still has one reset for everyone. The timezone only matters for DST, and the IANA zone handles that, so no DST question on the form.
+- ✅ Submit form defaults to the submitter's own timezone (was LA), shows a live "= 07:00 UTC · 12:00 AM your time" line to check against the in-game timer, and warns "Already tracked" while typing the name.
+- ✅ Server is a dropdown of 13 regions with plain labels ("Americas (North + South share one server)" vs "North America (US / Canada)"), stored as the catalog's existing values. "Other…" allows a short name (2–30 safe characters) and requires notes. The API enforces it (`src/constants/serverRegions.ts`), so "nutballsserver" or "Nutaku" is a 400.
+- ✅ Review panel shows every reset in UTC, marks similar games "same reset" / "1h later", and has "Same moment on:" buttons that rewrite the time onto UTC or a sibling server's clock. Server field is the same region list plus existing catalog spellings, with free text as a last resort.
 
-**Admin submissions page revamp** (`frontend/app/admin/submissions/page.tsx`)
-- Edit name, server, timezone and daily reset before approving, with the submitter's original values shown next to them.
-- Duplicate check: list existing games with a similar name or server so near-duplicates get caught.
-- Icon upload with a **live preview** of the real `GameCard` and `DashboardCard` using the edited data (countdown, local reset time, server tag), so the admin sees exactly what users will see.
-- "Approve & activate" in one step, with "approve as inactive" still available. Reject with a note.
-- Schema likely gets `games.icon_data BYTEA` + `icon_mime` (or a separate `game_icons` table), and maybe a `content_rating` column. Heroku migration first.
+**Tests:** `npm run test:icons` (unit, in CI) and `npm run test:submission-review` (e2e against the local backend, also covers the server rules).
 
-**Then review the 15 together.** Check each one against official sources (reset time, server, timezone), fix what's wrong, add an icon, approve or reject.
+**Then review the 16 together.** Check each one against official sources (reset time, server, timezone), fix what's wrong, add an icon, approve or reject.
 
 **NSFW / adult gacha games.** Not disallowed, but a gray area. Options:
 - (a) Allow with a `content_rating` flag. Hidden from browse and popular lists by default, opt-in toggle (profile for accounts, localStorage for anon), icon blurred until opted in.

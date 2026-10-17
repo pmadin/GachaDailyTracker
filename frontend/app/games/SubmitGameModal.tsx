@@ -1,26 +1,38 @@
 'use client';
 
-import { useState, useEffect, FormEvent } from 'react';
+import { useState, useEffect, useRef, FormEvent } from 'react';
 import Link from 'next/link';
-import { fetchTimezones, submitGame, type TimezoneEntry } from '../_lib/api';
+import { fetchGames, fetchTimezones, submitGame, type Game, type TimezoneEntry } from '../_lib/api';
 import { useAuth } from '../_context/AuthContext';
+import { displayServer, OTHER_SERVER_RE, SUBMIT_SERVER_OPTIONS } from '../_lib/servers';
+import { browserTimezone, resetLocal, resetUtc } from '../_lib/resetTime';
 
 interface Props {
   token: string;
   onClose: () => void;
 }
 
+const OTHER = '__other__';
+
 export default function SubmitGameModal({ token, onClose }: Props) {
   const { user } = useAuth();
   const emailUnverified = user?.email_verified === false;
   const [timezones, setTimezones] = useState<Record<string, TimezoneEntry[]>>({});
+  // Default to the submitter's own clock: that's the one they can read a time off.
+  const [myTz] = useState(browserTimezone);
   const [form, setForm] = useState({
     name: '',
     server: '',
-    timezone: 'America/Los_Angeles',
+    otherServer: '',
+    timezone: myTz,
     daily_reset: '04:00',
     notes: '',
   });
+  const [matches, setMatches] = useState<Game[]>([]);
+  const [otherTouched, setOtherTouched] = useState(false);
+  const [otherFocused, setOtherFocused] = useState(false);
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchSeq = useRef(0);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -29,20 +41,51 @@ export default function SubmitGameModal({ token, onClose }: Props) {
     fetchTimezones()
       .then(tz => setTimezones(tz))
       .catch(() => {});
+    return () => { if (searchTimer.current) clearTimeout(searchTimer.current); };
   }, []);
 
   const field = (key: keyof typeof form) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
       setForm(f => ({ ...f, [key]: e.target.value }));
 
+  // "Already tracked" lookup, debounced from the input handler.
+  const onNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const name = e.target.value;
+    setForm(f => ({ ...f, name }));
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    const seq = ++searchSeq.current;
+    if (name.trim().length < 3) { setMatches([]); return; }
+    searchTimer.current = setTimeout(() => {
+      fetchGames({ search: name.trim(), limit: 3 })
+        .then(r => { if (seq === searchSeq.current) setMatches(r.games); })
+        .catch(() => {});
+    }, 400);
+  };
+
+  const isOther = form.server === OTHER;
+  const serverValue = isOther ? form.otherServer.trim() : form.server;
+  // Flag bad characters as you type, but only complain about length once you leave the field,
+  // so the box doesn't go red on the first letter.
+  const otherText = form.otherServer.trim();
+  const otherBadChars = /[^A-Za-z0-9 &/()'-]/.test(otherText);
+  const otherError = !isOther || otherText === '' ? ''
+    : otherBadChars ? "Only letters, numbers, spaces and & / ( ) - ' are allowed."
+    : otherTouched && !OTHER_SERVER_RE.test(otherText) ? 'Use 2–30 characters, starting with a letter or number.'
+    : '';
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    if (isOther && !OTHER_SERVER_RE.test(serverValue)) {
+      setError("Server name: 2–30 letters, numbers, spaces or & / ( ) - '");
+      return;
+    }
     setSaving(true);
     setError('');
     try {
       const res = await submitGame(token, {
         name: form.name.trim(),
-        server: form.server.trim(),
+        server: serverValue,
+        server_other: isOther || undefined,
         timezone: form.timezone,
         daily_reset: form.daily_reset,
         notes: form.notes.trim() || undefined,
@@ -58,11 +101,21 @@ export default function SubmitGameModal({ token, onClose }: Props) {
     border: '1px solid rgba(200,155,60,0.15)',
     background: 'var(--surface)',
   };
+  const focus = {
+    onFocus: (e: React.FocusEvent<HTMLElement>) => (e.currentTarget.style.borderColor = 'rgba(200,155,60,0.55)'),
+    onBlur: (e: React.FocusEvent<HTMLElement>) => (e.currentTarget.style.borderColor = 'rgba(200,155,60,0.15)'),
+  };
+  const hint = 'mt-1 text-[11px] leading-snug';
+
+  // The curated list may not include the browser's zone; keep it selectable.
+  const tzKnown = Object.values(timezones).some(list => list.some(t => t.timezone === form.timezone));
+  const utc = resetUtc(form.timezone, form.daily_reset);
+  const local = resetLocal(form.timezone, form.daily_reset);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/60 p-4">
       <div
-        className="w-full max-w-md rounded-xl p-6"
+        className="my-auto w-full max-w-md rounded-xl p-6"
         style={{ border: '1px solid rgba(200,155,60,0.15)', background: 'var(--bg2)' }}
       >
         <h2 className="mb-5 text-base font-semibold text-white">Submit a Game for Review</h2>
@@ -108,77 +161,128 @@ export default function SubmitGameModal({ token, onClose }: Props) {
               <label className="mb-1 block text-xs text-zinc-400">Game Name *</label>
               <input
                 value={form.name}
-                onChange={field('name')}
+                onChange={onNameChange}
                 required
+                maxLength={255}
                 placeholder="e.g. Wuthering Waves"
                 className="w-full rounded-lg px-3 py-2 text-sm text-white outline-none"
                 style={inputStyle}
-                onFocus={e => (e.currentTarget.style.borderColor = 'rgba(200,155,60,0.55)')}
-                onBlur={e => (e.currentTarget.style.borderColor = 'rgba(200,155,60,0.15)')}
+                {...focus}
               />
+              {matches.length > 0 && (
+                <div className="mt-1.5 rounded-lg px-3 py-2 text-[11px]" style={{ background: 'rgba(200,155,60,0.07)', border: '1px solid var(--border)' }}>
+                  <p style={{ color: 'var(--gold)' }}>Already tracked. If your server is listed, add it from the games list instead:</p>
+                  <ul className="mt-1 space-y-0.5" style={{ color: 'var(--text2)' }}>
+                    {matches.map(g => (
+                      <li key={g.id}>
+                        {g.name} · {displayServer(g.server)}{' '}
+                        <span style={{ color: 'var(--text3)' }}>(resets {resetUtc(g.timezone, g.daily_reset)})</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
 
             <div>
-              <label className="mb-1 block text-xs text-zinc-400">Server / Region *</label>
-              <input
+              <label className="mb-1 block text-xs text-zinc-400">Server *</label>
+              <select
                 value={form.server}
                 onChange={field('server')}
-                required
-                placeholder="Global, NA, JP, etc."
-                className="w-full rounded-lg px-3 py-2 text-sm text-white outline-none"
-                style={inputStyle}
-                onFocus={e => (e.currentTarget.style.borderColor = 'rgba(200,155,60,0.55)')}
-                onBlur={e => (e.currentTarget.style.borderColor = 'rgba(200,155,60,0.15)')}
-              />
-            </div>
-
-            <div>
-              <label className="mb-1 block text-xs text-zinc-400">Timezone *</label>
-              <select
-                value={form.timezone}
-                onChange={field('timezone')}
                 required
                 className="w-full rounded-lg px-3 py-2 text-sm text-white outline-none"
                 style={inputStyle}
               >
-                {Object.entries(timezones).map(([region, entries]) => (
-                  <optgroup key={region} label={region} style={{ background: 'var(--bg2)' }}>
-                    {entries.map(e => (
-                      <option key={e.timezone} value={e.timezone} style={{ background: 'var(--bg2)' }}>
-                        {e.label} ({e.offset})
-                      </option>
-                    ))}
-                  </optgroup>
+                <option value="" disabled style={{ background: 'var(--bg2)' }}>Pick the server you play on…</option>
+                {SUBMIT_SERVER_OPTIONS.map(o => (
+                  <option key={o.value} value={o.value} style={{ background: 'var(--bg2)' }}>{o.label}</option>
                 ))}
+                <option value={OTHER} style={{ background: 'var(--bg2)' }}>Other…</option>
               </select>
+              {isOther && (
+                <input
+                  value={form.otherServer}
+                  onChange={field('otherServer')}
+                  required
+                  maxLength={30}
+                  placeholder="Server name as the game shows it"
+                  className="mt-2 w-full rounded-lg px-3 py-2 text-sm text-white outline-none"
+                  aria-invalid={!!otherError}
+                  // Longhand border props only: mixing the `border` shorthand with a changing
+                  // borderColor is what React warned about.
+                  style={{
+                    background: 'var(--surface)',
+                    borderWidth: 1,
+                    borderStyle: 'solid',
+                    borderColor: otherError ? 'rgba(239,68,68,0.6)' : otherFocused ? 'rgba(200,155,60,0.55)' : 'rgba(200,155,60,0.15)',
+                  }}
+                  onFocus={() => setOtherFocused(true)}
+                  onBlur={() => { setOtherFocused(false); setOtherTouched(true); }}
+                />
+              )}
+              {otherError && <p className="mt-1 text-[11px] text-red-400">{otherError}</p>}
+              <p className={hint} style={{ color: 'var(--text3)' }}>
+                Pick a region, not the store or platform (Steam, Nutaku, Google Play). A Global server still has one reset time for everyone on it.
+                {isOther && ' For Other, please explain the server in the notes.'}
+              </p>
+            </div>
+
+            <div className="grid grid-cols-[1fr_auto] gap-2">
+              <div className="min-w-0">
+                <label className="mb-1 block text-xs text-zinc-400">Timezone of that time *</label>
+                <select
+                  value={form.timezone}
+                  onChange={field('timezone')}
+                  required
+                  className="w-full rounded-lg px-3 py-2 text-sm text-white outline-none"
+                  style={inputStyle}
+                >
+                  {!tzKnown && <option value={form.timezone} style={{ background: 'var(--bg2)' }}>{form.timezone}{form.timezone === myTz ? ' (yours)' : ''}</option>}
+                  {Object.entries(timezones).map(([region, entries]) => (
+                    <optgroup key={region} label={region} style={{ background: 'var(--bg2)' }}>
+                      {entries.map(e => (
+                        <option key={e.timezone} value={e.timezone} style={{ background: 'var(--bg2)' }}>
+                          {e.label} ({e.offset}){e.timezone === myTz ? ' (yours)' : ''}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs text-zinc-400">Daily reset *</label>
+                <input
+                  type="time"
+                  value={form.daily_reset}
+                  onChange={field('daily_reset')}
+                  required
+                  className="w-full rounded-lg px-3 py-2 text-sm text-white outline-none"
+                  style={{ ...inputStyle, colorScheme: 'dark' }}
+                  {...focus}
+                />
+              </div>
+            </div>
+            <div className="-mt-1">
+              <p className="font-jetbrains-mono text-xs" style={{ color: 'var(--gold-bright)' }}>
+                = {utc}{local && ` · ${local} your time`}
+              </p>
+              <p className={hint} style={{ color: 'var(--text3)' }}>
+                Usually when daily login rewards reset. Enter it on your own clock or the server&apos;s, whichever is easier, and pick the matching timezone. Check the line above against the in-game timer.
+              </p>
             </div>
 
             <div>
-              <label className="mb-1 block text-xs text-zinc-400">Daily Reset *</label>
-              <input
-                type="time"
-                value={form.daily_reset}
-                onChange={field('daily_reset')}
-                required
-                className="w-full rounded-lg px-3 py-2 text-sm text-white outline-none"
-                style={{ ...inputStyle, colorScheme: 'dark' }}
-                onFocus={e => (e.currentTarget.style.borderColor = 'rgba(200,155,60,0.55)')}
-                onBlur={e => (e.currentTarget.style.borderColor = 'rgba(200,155,60,0.15)')}
-              />
-            </div>
-
-            <div>
-              <label className="mb-1 block text-xs text-zinc-400">Notes (optional)</label>
+              <label className="mb-1 block text-xs text-zinc-400">Notes {isOther ? '*' : '(optional)'}</label>
               <textarea
                 value={form.notes}
                 onChange={field('notes')}
-                placeholder="Any extra info for the admin…"
+                required={isOther}
+                placeholder={isOther ? 'Which server is this? Where did you find the reset time?' : 'Any extra info for the admin…'}
                 rows={3}
                 maxLength={500}
                 className="w-full resize-none rounded-lg px-3 py-2 text-sm text-white outline-none"
                 style={inputStyle}
-                onFocus={e => (e.currentTarget.style.borderColor = 'rgba(200,155,60,0.55)')}
-                onBlur={e => (e.currentTarget.style.borderColor = 'rgba(200,155,60,0.15)')}
+                {...focus}
               />
             </div>
 
