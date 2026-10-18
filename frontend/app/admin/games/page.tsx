@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef, FormEvent } from 'react';
+import { useState, useEffect, useCallback, FormEvent } from 'react';
 import { useAuth } from '../../_context/AuthContext';
 import Pagination from '../../_components/Pagination';
 import SortIcon, { type SortDir } from '../../_components/SortIcon';
@@ -21,6 +21,11 @@ import SubmissionsBadge from '../_components/SubmissionsBadge';
 import {
   adminInputStyle, focusOff, focusOn, ResetMoment, ResetTimeInput, ServerSelect, TimezoneSelect, useGameFieldData,
 } from '../_components/GameFieldControls';
+import { IconPicker, useIconPicker } from '../_components/IconPicker';
+import GameCard from '../../_components/GameCard';
+import { gameIconSrc } from '../../_lib/icons';
+
+const noop = () => {};
 
 const PAGE_SIZE = 50;
 
@@ -120,23 +125,29 @@ function SyncReportPanel({ report }: { report: SyncReport }) {
 type SortCol = 'name' | 'server' | 'timezone' | 'daily_reset' | 'tracked_by' | 'is_active';
 
 // ─── Game form modal (add + edit) ─────────────────────────────────────────────
+// Details and icon are saved together: the game is created/updated first, then the icon is
+// uploaded to it. If the icon fails after a create, the modal switches to editing the new
+// game so a retry doesn't try to create it twice.
 function GameFormModal({
+  token,
   game,
-  onSave,
+  onSaved,
   onClose,
 }: {
+  token: string;
   game: AdminGame | null;
-  onSave: (data: GamePayload) => Promise<void>;
+  onSaved: () => Promise<void>;
   onClose: () => void;
 }) {
   const { timezones, servers } = useGameFieldData();
+  const icon = useIconPicker(token);
+  const [savedId, setSavedId] = useState<number | null>(game?.id ?? null);
   const [form, setForm] = useState({
     name: game?.name ?? '',
     server: game?.server ?? '',
     timezone: game?.timezone ?? 'Etc/UTC',
     // The DB returns HH:MM:SS; the time input and the API both want HH:MM.
     daily_reset: (game?.daily_reset ?? '04:00').slice(0, 5),
-    icon_name: game?.icon_name ?? '',
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -146,82 +157,105 @@ function GameFormModal({
     e.preventDefault();
     setSaving(true);
     setError('');
+    const payload: GamePayload = {
+      name: form.name.trim(),
+      server: form.server.trim(),
+      timezone: form.timezone,
+      daily_reset: form.daily_reset,
+    };
+    let id = savedId;
     try {
-      const payload: GamePayload = {
-        name: form.name.trim(),
-        server: form.server.trim(),
-        timezone: form.timezone,
-        daily_reset: form.daily_reset,
-      };
-      if (!game && form.icon_name.trim()) payload.icon_name = form.icon_name.trim();
-      await onSave(payload);
-      onClose();
+      if (id == null) id = (await createAdminGame(token, payload)).game.id;
+      else await updateAdminGame(token, id, payload);
+      setSavedId(id);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to save');
       setSaving(false);
+      return;
     }
+    try {
+      if (icon.ready) await uploadGameIcon(token, id, icon.ready, icon.fit);
+    } catch (err: unknown) {
+      await onSaved();
+      setError(`Details saved, but the icon upload failed: ${err instanceof Error ? err.message : 'unknown error'}. Pick another file and save again.`);
+      setSaving(false);
+      return;
+    }
+    await onSaved();
+    onClose();
   };
 
   const label = 'mb-1 block text-xs text-zinc-400';
+  const currentIcon = game?.icon_name ? gameIconSrc(game.icon_name) : undefined;
+  const previewGame = {
+    id: -1,
+    name: form.name.trim() || 'Untitled game',
+    server: form.server.trim() || '—',
+    timezone: form.timezone,
+    daily_reset: `${form.daily_reset}:00`,
+    icon_name: '',
+    last_verified: '',
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/60 p-4">
-      <div className="my-auto w-full max-w-md rounded-xl p-6" style={{ border: '1px solid rgba(200,155,60,0.15)', background: 'var(--bg2)' }}>
+      <div className="my-auto w-full max-w-3xl rounded-xl p-6" style={{ border: '1px solid rgba(200,155,60,0.15)', background: 'var(--bg2)' }}>
         <h2 className="mb-5 text-base font-semibold text-white">
-          {game ? 'Edit Game' : 'Add Game'}
+          {savedId != null ? 'Edit Game' : 'Add Game'}
         </h2>
-        <form onSubmit={handleSubmit} className="space-y-3">
-          <div>
-            <label className={label}>Name</label>
-            <input value={form.name} onChange={e => set('name')(e.target.value)} required maxLength={255} placeholder="Genshin Impact"
-              className="w-full rounded-lg px-3 py-2 text-sm text-white outline-none" style={adminInputStyle} onFocus={focusOn} onBlur={focusOff} />
-          </div>
-          <div>
-            <label className={label}>Server</label>
-            <ServerSelect value={form.server} onChange={set('server')} servers={servers} />
-          </div>
-          <div className="grid grid-cols-[1fr_auto] gap-2">
-            <div className="min-w-0">
-              <label className={label}>Timezone</label>
-              <TimezoneSelect value={form.timezone} onChange={set('timezone')} timezones={timezones} />
-            </div>
+        <form onSubmit={handleSubmit} className="grid gap-6 md:grid-cols-[1fr_0.9fr]">
+          <div className="space-y-3">
             <div>
-              <label className={label}>Daily reset</label>
-              <ResetTimeInput value={form.daily_reset} onChange={set('daily_reset')} />
-            </div>
-          </div>
-          <ResetMoment timezone={form.timezone} dailyReset={form.daily_reset}
-            onRewrite={(timezone, daily_reset) => setForm(f => ({ ...f, timezone, daily_reset }))} />
-          {!game && (
-            <div>
-              <label className={label}>Upstream icon file (optional)</label>
-              <input value={form.icon_name} onChange={e => set('icon_name')(e.target.value)} maxLength={100} pattern="[A-Za-z0-9 ._\-]+"
-                placeholder="genshin-impact"
+              <label className={label}>Name</label>
+              <input value={form.name} onChange={e => set('name')(e.target.value)} required maxLength={255} placeholder="Genshin Impact"
                 className="w-full rounded-lg px-3 py-2 text-sm text-white outline-none" style={adminInputStyle} onFocus={focusOn} onBlur={focusOff} />
-              <p className="mt-1 text-xs" style={{ color: 'var(--text3)' }}>
-                Only for a Game-Time-Master icon name, without .gif. To upload your own image, add the game, then use Icon on its row.
-              </p>
             </div>
-          )}
-          {error && (
-            <p className="rounded-lg bg-red-950 px-3 py-2 text-sm text-red-400">{error}</p>
-          )}
-          <div className="flex gap-2 pt-1">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 rounded-lg border border-[rgba(200,155,60,0.15)] py-2 text-sm text-[#9a8570] hover:text-[#f0ede8]"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={saving}
-              className="flex-1 rounded-lg py-2 text-sm font-medium hover:opacity-90 disabled:opacity-50"
-              style={{ background: 'linear-gradient(135deg, #c8913c, #e8c86a)', color: '#0a0808' }}
-            >
-              {saving ? 'Saving…' : game ? 'Save changes' : 'Add game'}
-            </button>
+            <div>
+              <label className={label}>Server</label>
+              <ServerSelect value={form.server} onChange={set('server')} servers={servers} />
+            </div>
+            <div className="grid grid-cols-[1fr_auto] gap-2">
+              <div className="min-w-0">
+                <label className={label}>Timezone</label>
+                <TimezoneSelect value={form.timezone} onChange={set('timezone')} timezones={timezones} />
+              </div>
+              <div>
+                <label className={label}>Daily reset</label>
+                <ResetTimeInput value={form.daily_reset} onChange={set('daily_reset')} />
+              </div>
+            </div>
+            <ResetMoment timezone={form.timezone} dailyReset={form.daily_reset}
+              onRewrite={(timezone, daily_reset) => setForm(f => ({ ...f, timezone, daily_reset }))} />
+            <IconPicker picker={icon} currentSrc={currentIcon} label="Icon" />
+          </div>
+
+          <div className="space-y-4">
+            <div>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text3)' }}>Preview: games browser</p>
+              <GameCard game={previewGame} isTracked={false} onAdd={noop} onRemove={noop}
+                iconSrc={icon.preview?.url ?? currentIcon ?? '/placeholder.svg'} />
+            </div>
+            {error && (
+              <p className="rounded-lg bg-red-950 px-3 py-2 text-sm text-red-400">{error}</p>
+            )}
+            <div className="flex gap-2 pt-1">
+              <button
+                type="button"
+                onClick={onClose}
+                disabled={saving}
+                className="flex-1 rounded-lg border border-[rgba(200,155,60,0.15)] py-2 text-sm text-[#9a8570] hover:text-[#f0ede8]"
+              >
+                {savedId != null && !game ? 'Close' : 'Cancel'}
+              </button>
+              <button
+                type="submit"
+                disabled={saving || icon.busy}
+                className="flex-1 rounded-lg py-2 text-sm font-medium hover:opacity-90 disabled:opacity-50"
+                style={{ background: 'linear-gradient(135deg, #c8913c, #e8c86a)', color: '#0a0808' }}
+              >
+                {saving ? 'Saving…' : savedId != null ? 'Save changes' : 'Add game'}
+              </button>
+            </div>
           </div>
         </form>
       </div>
@@ -312,8 +346,6 @@ export default function AdminGamesPage() {
   const [patchLoading, setPatchLoading] = useState(false);
   const [patchResult, setPatchResult] = useState('');
 
-  const iconInputRef = useRef<HTMLInputElement>(null);
-  const [iconTargetId, setIconTargetId] = useState<number | null>(null);
 
   const [sortCol, setSortCol] = useState<SortCol>('name');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
@@ -367,16 +399,6 @@ export default function AdminGamesPage() {
     e.preventDefault();
     setPage(0);
     setSubmittedSearch(search);
-  };
-
-  const handleSave = async (data: GamePayload) => {
-    if (!token) return;
-    if (editGame) {
-      await updateAdminGame(token, editGame.id, data);
-    } else {
-      await createAdminGame(token, data);
-    }
-    await load();
   };
 
   const handleToggleActive = async (game: AdminGame) => {
@@ -452,33 +474,10 @@ export default function AdminGamesPage() {
     }
   };
 
-  const handleIconFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !iconTargetId || !token) return;
-    try {
-      await uploadGameIcon(token, iconTargetId, file);
-      await load();
-    } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : 'Icon upload failed');
-    } finally {
-      e.target.value = '';
-      setIconTargetId(null);
-    }
-  };
-
   const totalPages = Math.ceil(total / PAGE_SIZE);
 
   return (
     <>
-      {/* Hidden file input for icon uploads */}
-      <input
-        ref={iconInputRef}
-        type="file"
-        accept="image/png,image/jpeg,image/webp,image/gif"
-        className="hidden"
-        onChange={handleIconFileChange}
-      />
-
       {/* Header */}
       <div className="mb-6 flex items-center justify-between">
         <div>
@@ -648,12 +647,18 @@ export default function AdminGamesPage() {
                   }`}
                 >
                   <td className="px-4 py-3">
-                    <div className="font-medium text-white">{game.name}</div>
-                    {game.icon_name ? (
-                      <div className="text-xs text-zinc-500">{game.icon_name}</div>
-                    ) : (
-                      <div className="text-xs text-amber-500/80">no icon</div>
-                    )}
+                    <div className="flex items-center gap-3">
+                      <div style={{ width: 28, height: 28, flexShrink: 0 }}>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={game.icon_name ? gameIconSrc(game.icon_name) : '/placeholder.svg'} alt="" width={28} height={28}
+                          loading="lazy" className="rounded" style={{ aspectRatio: '1/1' }}
+                          onError={e => { (e.currentTarget as HTMLImageElement).src = '/placeholder.svg'; }} />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="font-medium text-white">{game.name}</div>
+                        {!game.icon_name && <div className="text-xs text-amber-500/80">no icon</div>}
+                      </div>
+                    </div>
                   </td>
                   <td className="px-4 py-3 text-zinc-400">{game.server}</td>
                   <td className="hidden px-4 py-3 text-xs text-zinc-500 md:table-cell">
@@ -691,16 +696,6 @@ export default function AdminGamesPage() {
                           ? 'Deactivate'
                           : 'Restore'}
                       </button>
-                      <button
-                        onClick={() => {
-                          setIconTargetId(game.id);
-                          iconInputRef.current?.click();
-                        }}
-                        className="rounded px-2 py-1 text-xs text-[#9a8570] transition-colors hover:bg-[#18140d] hover:text-[#f0ede8]"
-                        title="Upload a custom icon (PNG, JPEG, WebP or GIF, up to 2 MB; center-cropped to 96×96)"
-                      >
-                        Icon
-                      </button>
                       {user?.role === 4 && (
                         <button
                           onClick={() => setConfirmDelete(game)}
@@ -724,8 +719,9 @@ export default function AdminGamesPage() {
       {/* Modals */}
       {(addingGame || editGame) && (
         <GameFormModal
+          token={token!}
           game={editGame}
-          onSave={handleSave}
+          onSaved={load}
           onClose={() => { setEditGame(null); setAddingGame(false); }}
         />
       )}

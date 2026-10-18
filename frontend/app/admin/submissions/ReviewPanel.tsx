@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import GameCard from '../../_components/GameCard';
 import DashboardCard from '../../_components/DashboardCard';
 import { gameIconSrc } from '../../_lib/icons';
@@ -8,12 +8,11 @@ import { describeResetDiff, resetDiffMinutes, resetUtc } from '../../_lib/resetT
 import {
   adminInputStyle, focusOff, focusOn, ResetMoment, ResetTimeInput, ServerSelect, TimezoneSelect, useGameFieldData,
 } from '../_components/GameFieldControls';
+import { IconPicker, useIconPicker } from '../_components/IconPicker';
 import {
   approveSubmission,
   fetchSimilarGames,
-  previewIcon,
   type GameSubmission,
-  type IconFit,
   type SimilarGame,
 } from '../../_lib/api';
 
@@ -60,12 +59,7 @@ export default function ReviewPanel({
   const { timezones, servers } = useGameFieldData();
   const [similar, setSimilar] = useState<SimilarGame[] | null>(null);
 
-  const [iconFile, setIconFile] = useState<File | null>(null);
-  const [fit, setFit] = useState<IconFit>('cover');
-  const [iconPreview, setIconPreview] = useState<{ url: string; bytes: number; animated: boolean } | null>(null);
-  const [iconError, setIconError] = useState('');
-  const [iconBusy, setIconBusy] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
+  const icon = useIconPicker(token);
 
   const [saving, setSaving] = useState<'active' | 'inactive' | null>(null);
   const [error, setError] = useState('');
@@ -86,22 +80,6 @@ export default function ReviewPanel({
     return () => clearTimeout(id);
   }, [token, submission.id, form.name]);
 
-  // Run the real server pipeline on every file or fit change. Only the latest request wins.
-  const previewSeq = useRef(0);
-  const runPreview = useCallback((file: File, nextFit: IconFit) => {
-    const seq = ++previewSeq.current;
-    setIconBusy(true);
-    setIconError('');
-    previewIcon(token, file, nextFit)
-      .then(r => { if (seq === previewSeq.current) setIconPreview({ url: r.data_url, bytes: r.bytes, animated: r.animated }); })
-      .catch(err => {
-        if (seq !== previewSeq.current) return;
-        setIconPreview(null);
-        setIconError(err instanceof Error ? err.message : 'Icon processing failed');
-      })
-      .finally(() => { if (seq === previewSeq.current) setIconBusy(false); });
-  }, [token]);
-
   const exactDupe = useMemo(
     () => similar?.find(g =>
       g.name.toLowerCase() === form.name.trim().toLowerCase() &&
@@ -115,15 +93,6 @@ export default function ReviewPanel({
   const set = (key: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setForm(f => ({ ...f, [key]: e.target.value }));
 
-  const clearIcon = () => {
-    previewSeq.current++;
-    setIconBusy(false);
-    setIconFile(null);
-    setIconPreview(null);
-    setIconError('');
-    if (fileRef.current) fileRef.current.value = '';
-  };
-
   const approve = async (activate: boolean) => {
     setSaving(activate ? 'active' : 'inactive');
     setError('');
@@ -131,7 +100,7 @@ export default function ReviewPanel({
       const res = await approveSubmission(
         token,
         submission.id,
-        { ...form, name: form.name.trim(), server: form.server.trim(), activate, icon: iconPreview ? iconFile : null, fit },
+        { ...form, name: form.name.trim(), server: form.server.trim(), activate, icon: icon.ready, fit: icon.fit },
         notes.trim() || undefined,
       );
       onDone(res.message);
@@ -150,7 +119,7 @@ export default function ReviewPanel({
     icon_name: '',
     last_verified: '',
   };
-  const previewIconSrc = iconPreview?.url ?? '/placeholder.svg';
+  const previewIconSrc = icon.preview?.url ?? '/placeholder.svg';
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/70 p-4" onClick={() => !saving && onClose()}>
@@ -225,45 +194,7 @@ export default function ReviewPanel({
               )}
             </div>
 
-            {/* Icon */}
-            <div>
-              <Label>Icon (optional)</Label>
-              <div className="flex flex-wrap items-center gap-3">
-                <div className="flex h-[72px] w-[72px] flex-shrink-0 items-center justify-center overflow-hidden rounded-lg"
-                  style={{ background: 'var(--bg3)', border: '1px solid var(--border)' }}>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={previewIconSrc} alt="" width={72} height={72} style={{ aspectRatio: '1/1', opacity: iconBusy ? 0.4 : 1 }} />
-                </div>
-                <div className="space-y-2">
-                  <div className="flex flex-wrap gap-2">
-                    <button type="button" onClick={() => fileRef.current?.click()}
-                      className="rounded-lg border border-[rgba(200,155,60,0.15)] px-3 py-1.5 text-xs text-[#9a8570] hover:text-[#f0ede8]">
-                      {iconFile ? 'Change file' : 'Choose file'}
-                    </button>
-                    {iconFile && (
-                      <button type="button" onClick={clearIcon} className="rounded-lg px-2 py-1.5 text-xs text-zinc-500 hover:text-zinc-300">
-                        Remove
-                      </button>
-                    )}
-                  </div>
-                  <div className="flex w-fit overflow-hidden rounded-lg border border-[rgba(200,155,60,0.15)] text-xs" role="group" aria-label="Icon fit">
-                    {(['cover', 'contain'] as const).map(f => (
-                      <button key={f} type="button" onClick={() => { setFit(f); if (iconFile) runPreview(iconFile, f); }} aria-pressed={fit === f}
-                        className={`px-3 py-1.5 ${fit === f ? 'bg-[rgba(200,155,60,0.15)] text-[#e8c86a]' : 'text-[#9a8570] hover:text-[#f0ede8]'}`}>
-                        {f === 'cover' ? 'Crop' : 'Pad'}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-              <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden"
-                onChange={e => { const f = e.target.files?.[0]; if (f) { setIconFile(f); runPreview(f, fit); } }} />
-              <p className="mt-2 text-xs" style={{ color: 'var(--text3)' }}>
-                PNG, JPEG, WebP or GIF up to 2 MB. Re-encoded to a 96×96 WebP on the server; this preview is the real output.
-                {iconPreview && ` ${(iconPreview.bytes / 1024).toFixed(1)} KB${iconPreview.animated ? ', animated' : ''}.`}
-              </p>
-              {iconError && <p className="mt-1 text-xs text-red-400">{iconError}</p>}
-            </div>
+            <IconPicker picker={icon} />
 
             <div>
               <Label>Review notes (optional)</Label>
@@ -348,11 +279,11 @@ export default function ReviewPanel({
             className="rounded-lg border border-[rgba(200,155,60,0.15)] px-4 py-2 text-sm text-[#9a8570] hover:text-[#f0ede8]">
             Cancel
           </button>
-          <button type="button" onClick={() => approve(false)} disabled={!!saving || iconBusy || !!exactDupe}
+          <button type="button" onClick={() => approve(false)} disabled={!!saving || icon.busy || !!exactDupe}
             className="rounded-lg border border-[rgba(200,155,60,0.28)] px-4 py-2 text-sm text-[#e8c86a] hover:bg-[rgba(200,155,60,0.08)] disabled:opacity-50">
             {saving === 'inactive' ? 'Approving…' : 'Approve as inactive'}
           </button>
-          <button type="button" onClick={() => approve(true)} disabled={!!saving || iconBusy || !!exactDupe}
+          <button type="button" onClick={() => approve(true)} disabled={!!saving || icon.busy || !!exactDupe}
             className="rounded-lg px-4 py-2 text-sm font-semibold disabled:opacity-50"
             style={{ background: 'linear-gradient(135deg, #c8913c, #e8c86a)', color: '#0a0808' }}>
             {saving === 'active' ? 'Approving…' : 'Approve & activate'}
