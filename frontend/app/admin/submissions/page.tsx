@@ -353,6 +353,11 @@ export default function AdminSubmissionsPage() {
                       </div>
                     ) : (
                       <div className="text-xs text-zinc-600">
+                        <div className="whitespace-nowrap" title={sub.reviewed_at ? new Date(sub.reviewed_at).toLocaleString() : undefined}>
+                          {sub.status === 'approved' ? 'Approved' : 'Rejected'} by{' '}
+                          <span style={{ color: 'var(--text2)' }}>{sub.reviewed_by_username ?? 'a deleted account'}</span>
+                          {sub.reviewed_at && <> · {formatDate(sub.reviewed_at)}</>}
+                        </div>
                         {sub.review_notes && (
                           <span
                             className="cursor-pointer text-zinc-500 hover:text-zinc-300"

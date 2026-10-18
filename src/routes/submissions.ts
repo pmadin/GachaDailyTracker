@@ -201,8 +201,9 @@ adminSubmissionsRouter.get('/submissions', requireAdmin, async (req: Request, re
                 `SELECT
                    gs.id, gs.name, gs.server, gs.timezone, gs.daily_reset,
                    gs.notes, gs.status, gs.submitter_role,
-                   gs.review_notes, gs.reviewed_at, gs.created_at,
-                   u_reviewer.role AS reviewed_by_role
+                   gs.review_notes, gs.reviewed_at, gs.created_at, gs.game_id,
+                   u_reviewer.role AS reviewed_by_role,
+                   u_reviewer.username AS reviewed_by_username
                  FROM game_submissions gs
                  LEFT JOIN users u_reviewer ON gs.reviewed_by = u_reviewer.id
                  ${where}

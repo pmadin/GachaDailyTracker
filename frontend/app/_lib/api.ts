@@ -462,6 +462,8 @@ export interface GameSubmission {
   submitter_role_name: string;
   reviewed_by_role: number | null;
   reviewed_by_role_name: string | null;
+  /** Admin who approved/rejected it; null if that account was deleted. Admin-only route. */
+  reviewed_by_username: string | null;
   review_notes: string | null;
   reviewed_at: string | null;
   game_id: number | null;
