@@ -125,14 +125,23 @@ Comes before weekly resets. 16 user-submitted games were sitting in `game_submis
 
 **Tests:** `npm run test:icons` (unit, in CI) and `npm run test:submission-review` (e2e against the local backend, also covers the server rules).
 
-**Then review the 16 together.** Check each one against official sources (reset time, server, timezone), fix what's wrong, add an icon, approve or reject.
+**Review of the 16** ✅ (Oct 2026, oldest first, each checked against sources). 13 handled, 3 adult ones left pending (see NSFW below).
+- Approved: PGR Asia-Pacific (#3235, inactive), XXL WOOFIA, DMC: Peak of Combat Americas, Evitania Online, Aniimo EU, Lord of Mysteries CN (inactive, 08:00 Beijing unverified), Company of Heroes 3 (`Etc/UTC 00:00`, from the 1.1.0 patch notes: daily challenges at 12:00 am GMT), Neverness to Everness CN, Azur Promilia CN (inactive, beta reset time).
+- Rejected: Hololive Dreams, CookieRun: Crumble, Limbus Company (all already tracked at the same reset), Legend of Phoenix (couldn't identify it).
+- Left over: rename #3235 to "Punishing: Gray Raven" and activate it. Activate Lord of Mysteries CN and Azur Promilia CN once their reset times are confirmed.
 
-**NSFW / adult gacha games.** Not disallowed, but a gray area. Options:
+**Not merged yet, ships with the next pillar's PR.** These are on `dev` after the Pillar 3 merge. None needs a migration:
+- `589687c` Add/Edit Game uses the region, timezone and reset pickers; the API validates the timezone and reset time, and a rename clash is a 409.
+- `e5646b7` Reviewed submissions show who approved or rejected them ("Approved by <username>").
+- `fd6b314` Icon upload with a live preview inside Add/Edit Game, icon thumbnails on the game rows, separate Icon button removed.
+- Small fix still to do: the "game #id" link on a reviewed submission opens `/admin/games` but doesn't search for that game (the page ignores `?search=`).
+
+**NSFW / adult gacha games.** Put off for now (Booty Calls, Poker n' Sluts and Black Myth: Westward Journey, all "Nutaku", stay pending). Revisit when more come in. The catalog already has some from upstream (e.g. Action Taimanin). Leaning toward a small, discreet 18+ marker on game-list cards, or nothing at all, rather than anything that draws attention. Earlier options:
 - (a) Allow with a `content_rating` flag. Hidden from browse and popular lists by default, opt-in toggle (profile for accounts, localStorage for anon), icon blurred until opted in.
 - (b) Allow only if the game is on a mainstream store (Google Play, App Store, Steam) and use that store's rating as the line.
 - (c) Reject explicit-only titles.
 
-Leaning (a). Decide during the review. The ToS and privacy policy may need a line either way.
+The ToS and privacy policy may need a line either way.
 
 ---
 
@@ -163,6 +172,8 @@ From a closed GitHub issue: WuWa has a mode that gives 160 Astrite and resets we
 **Popular Games: count anon users, weighted.** Right now only accounts move the chart. `/games/popular` ranks by `games.add_count`, which only goes up on the logged-in add routes (`POST /tracker/games/:id` and `/bulk` in `src/routes/tracker/tracker.ts`). Anon adds stay in localStorage, and only reach the chart if that person later registers and their list gets bulk-synced. `add_count` also never goes down: removing a game or deleting an account doesn't subtract, so it's lifetime adds rather than current popularity. With a small user base, a few accounts adding and removing games reshuffled the top 10 a lot within about two months.
 
 **Leader board update** at the moment the leader board is at coming soon the issue is that that i need more users to be consistant with doing thier dailes. so a most 5 or less users are on the board. this is where you can break two leader boards a current streak and a historic best streak so that maybe like 20 users in the past have got a best streak of 1-20 days we have some activty. but we can toggle this in the admin to show both historic best streak and live current streaks. someone could have both spots of live and best like a person with 60 current would also be 60 at the best streak leaderboard.
+
+**Proper Logout on JWT Exprired Sessions** At the moment i think we have a 30 day JWT exprired sessions. but we need to make sure that when a user logs out that the JWT is also removed from the client side. and the front end shows they are logged out. in this screen shot my main JWT toke has expired but im not really logout i have to click on my profle and logout. it looks bugged. but i know the token expired because my game track list is empty. ![img.png](img.png) this should be like the first major thing to fix in this section.
 
 Plan: a weighted score that mixes both groups.
 - **Accounts:** rank by how many users track the game right now (`COUNT(*)` from `user_games`) instead of the lifetime `add_count`, so removals and deleted accounts drop out.
